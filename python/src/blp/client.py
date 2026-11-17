@@ -2,9 +2,11 @@
 """
 import atexit
 import datetime
+import logging
 from collections import defaultdict, namedtuple
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any, Self
 
@@ -27,11 +29,16 @@ from Blp.HistoricalData import PricingOption
 from Blp.IntradayBars import IntradayBarRequest
 from Blp.IntradayTicks import IntradayTickRequest
 from Blp.ReferenceData import ReferenceDataRequest
+from Blp.Subscriptions import CallbackLogger
+from Blp.Subscriptions import Subscription as NetSubscription
+from Blp.Subscriptions import SubscriptionOptions
+from Microsoft.Extensions.Logging import LogLevel
 from opendate import LCL, UTC, Date, DateTime, Time, Timezone
-from System import DateOnly, DateTimeOffset, IAsyncResult, String, TimeOnly
-from System import TimeSpan, TimeZoneInfo
-from System.Collections.Generic import Dictionary, List
+from System import Action, DateOnly, DateTimeOffset, IAsyncResult, Object
+from System import String, TimeOnly, TimeSpan, TimeZoneInfo
+from System.Collections.Generic import Dictionary, IReadOnlyDictionary, List
 from System.Threading import CancellationToken, CancellationTokenSource
+from System.Threading import Timeout
 from System.Threading.Tasks import Task
 
 __all__ = [
@@ -52,6 +59,9 @@ __all__ = [
     'IntradayResponse',
     'EQSResponse',
     'BQLResponse',
+    'Subscription',
+    'SubscriptionStatus',
+    'TopicState',
     ]
 
 REQUEST_IDLE_SECONDS = 120
@@ -714,12 +724,14 @@ class BQLResponse:
         return result
 
 
+logger = logging.getLogger(__name__)
+
 live_clients: set = set()
 
 
 @atexit.register
 def dispose_live_clients() -> None:
-    """Stop the session of every Blp not yet closed.
+    """Stop the session of every Blp and Subscription not yet closed.
     """
     while live_clients:
         live_clients.pop().Dispose()
@@ -756,6 +768,8 @@ class Blp:
       positional host raises TypeError.
     - Leaving a with block stops the session. An exit hook stops any
       session still running.
+    - Topic failures, connection and event-queue warnings and on_tick
+      errors go to the blp.client logger.
     """
 
     def __init__(
@@ -1235,3 +1249,235 @@ class Blp:
         request.TotalTimeout = None
         if self.total_seconds is not None:
             request.TotalTimeout = TimeSpan.FromSeconds(self.total_seconds)
+
+
+PYTHON_LEVEL_BY_LOG_LEVEL = {
+    LogLevel.Trace: logging.DEBUG,
+    LogLevel.Debug: logging.DEBUG,
+    LogLevel.Information: logging.INFO,
+    LogLevel.Warning: logging.WARNING,
+    LogLevel.Error: logging.ERROR,
+    LogLevel.Critical: logging.CRITICAL,
+    }
+
+
+def log_line(level: LogLevel, line: str, error: System.Exception | None) -> None:
+    """Write one blp-net log line to this module's logger, with the text of
+    the exception it carries on the lines after it.
+    """
+    text = line if error is None else f'{line}\n{error}'
+    logger.log(PYTHON_LEVEL_BY_LOG_LEVEL[level], text)
+
+
+def utc_or_none(value: DateTimeOffset | None) -> DateTime | None:
+    """DateTime in UTC of a blp-net instant, None for null.
+    """
+    return None if value is None else to_python(value, UTC)
+
+
+@dataclass
+class TopicState:
+    """One topic's state, as Subscription.status() copies it.
+
+    Attributes
+    ----------
+    topic : str
+    status : str
+        'pending' until Bloomberg answers the subscribe, then 'subscribed',
+        or 'failed' on a failure or on a termination remove() did not cause.
+    reason : str or None
+        Bloomberg's description, for a failed topic.
+    subscribed_at, first_data_at, last_tick_at : DateTime or None
+        UTC times of SubscriptionStarted, the first tick and the latest tick.
+    ticks_last_minute : int
+        Ticks received in the minute before the status() call.
+    """
+
+    topic: str
+    status: str
+    reason: str | None
+    subscribed_at: DateTime | None
+    first_data_at: DateTime | None
+    last_tick_at: DateTime | None
+    ticks_last_minute: int
+
+
+@dataclass
+class SubscriptionStatus:
+    """A consistent copy of a Subscription's state.
+
+    Attributes
+    ----------
+    failure : str or None
+        Why the subscription can no longer deliver data, or None while it
+        can: 'session terminated' outside stop(), 'all N topics failed:
+        reason', or 'no subscription data within 60 s' of the first add().
+        The owner replaces a failed subscription.
+    connected : bool
+        False between SessionConnectionDown and SessionConnectionUp.
+    error_cnt : int
+        Exceptions caught from parsing a tick, from on_tick, or from
+        stopping.
+    last_error : str or None
+        'topic: type: message' of the latest one. An exception on_tick
+        raises has the type PythonException.
+    topics : dict[str, TopicState]
+        Held topics, in add order.
+    """
+
+    failure: str | None
+    connected: bool
+    error_cnt: int
+    last_error: str | None
+    topics: dict[str, TopicState]
+
+
+class Subscription:
+    """Live market data on its own session on localhost:8194 with OS logon.
+
+    Parameters
+    ----------
+    fields : str or list[str]
+        Fields whose changes raise a tick, such as ['BID', 'ASK'].
+    on_tick : Callable[[str, dict[str, Any]], None]
+        Called with (topic, {field: value}) for each tick, on Bloomberg's
+        dispatch thread, with no lock held, so it may call add, remove,
+        status or stop. Read at each tick. A row holds the fields present
+        in the message, a date-time or time in this host's zone, and NaN
+        for a null. The subscription catches and counts what it raises.
+    interval : float, default 0
+        Seconds between conflated updates, sent to the tenth. None or 0
+        leaves updates unconflated. Fixed at construction.
+    application_identity_key : str, optional
+        Bloomberg application identity key.
+
+    Raises
+    ------
+    SessionCreateError
+        The session failed to start.
+    SessionStartError
+        //blp/mktdata failed to open.
+
+    Notes
+    -----
+    - The Python blp's host, port, auth, assumed_timezone,
+      desired_timezone and time_as_datetime have no blp-net counterpart,
+      so passing one raises TypeError.
+    - Leaving a with block stops the session. An exit hook stops any
+      session still running.
+    """
+
+    def __init__(
+        self,
+        fields: str | list[str],
+        on_tick: Callable[[str, dict[str, Any]], None],
+        interval: float = 0,
+        *,
+        application_identity_key: str | None = None) -> None:
+        self.on_tick = on_tick
+        options = SubscriptionOptions()
+        options.ApplicationIdentityKey = application_identity_key
+        options.Interval = TimeSpan.FromSeconds(interval or 0)
+        write = Action[LogLevel, String, System.Exception](log_line)
+        options.Logger = CallbackLogger(write)
+        callback = Action[String, IReadOnlyDictionary[String, Object]](self._dispatch)
+        with translated_errors():
+            self.subscription = NetSubscription.Start(
+                to_string_list(fields),
+                callback,
+                options)
+        live_clients.add(self.subscription)
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type | None,
+        exc_value: BaseException | None,
+        tb: Any) -> None:
+        self.stop()
+
+    def _dispatch(self, topic: str, row: Any) -> None:
+        """Hand on_tick the topic and its row, each value converted.
+        """
+        self.on_tick(topic, {pair.Key: to_python(pair.Value, LCL) for pair in row})
+
+    def add(self, topics: str | list[str]) -> None:
+        """Subscribe topics, such as 'IBM US Equity'.
+
+        Parameters
+        ----------
+        topics : str or list[str]
+            A held topic is skipped, except a failed one, which is
+            subscribed again.
+
+        Raises
+        ------
+        SessionNotAvailableError
+            The session is not started. No topic of the call is held.
+        SessionError
+            stop() has begun.
+        System.ArgumentException
+            Bloomberg rejects a topic, such as ''. No topic of the call is
+            held.
+        """
+        with translated_errors():
+            self.subscription.Add(to_string_list(topics))
+
+    def remove(self, topics: str | list[str]) -> None:
+        """Unsubscribe topics. A topic not held is skipped.
+        """
+        with translated_errors():
+            self.subscription.Remove(to_string_list(topics))
+
+    def status(self) -> SubscriptionStatus:
+        """A consistent copy of the state, as of now.
+        """
+        net_status = self.subscription.GetStatus()
+        topics = {
+            pair.Key: TopicState(
+                pair.Value.Topic,
+                str(pair.Value.Status).lower(),
+                pair.Value.Reason,
+                utc_or_none(pair.Value.SubscribedAt),
+                utc_or_none(pair.Value.FirstDataAt),
+                utc_or_none(pair.Value.LastTickAt),
+                pair.Value.TicksLastMinute)
+            for pair in net_status.Topics
+            }
+        return SubscriptionStatus(
+            net_status.Failure,
+            net_status.Connected,
+            net_status.ErrorCount,
+            net_status.LastError,
+            topics)
+
+    def stop(self, timeout: float = 10.0) -> bool:
+        """Unsubscribe every topic and release the session.
+
+        Parameters
+        ----------
+        timeout : float or None, default 10.0
+            Longest wait, in seconds, for the session to terminate. None
+            waits without limit.
+
+        Returns
+        -------
+        bool
+            True when the session is released. False when the wait timed
+            out, or when called from on_tick, which begins the stop and
+            returns at once. The exit hook then stops the session again.
+
+        Raises
+        ------
+        System.ArgumentOutOfRangeException
+            timeout is negative. The stop has not begun.
+        """
+        wait = Timeout.InfiniteTimeSpan
+        if timeout is not None:
+            wait = TimeSpan.FromSeconds(timeout)
+        released = self.subscription.Stop(wait)
+        if released:
+            live_clients.discard(self.subscription)
+        return released

@@ -1,5 +1,6 @@
 import _thread
 import datetime
+import logging
 import math
 import threading
 from typing import Any
@@ -13,7 +14,7 @@ from Blp import IntradayEventType, RequestFieldException
 from Blp import RequestSecurityException, RequestTimeoutException
 from Blp import ResponseException
 from Blp import SecurityError as NetSecurityError
-from Blp import SessionException
+from Blp import SessionException, SessionNotAvailableException
 from Blp.Bql import BqlResponse
 from Blp.Eqs import EqsResponse, EqsScreenType
 from Blp.HistoricalData import HistoricalDataResponse, HistoricalDataRow
@@ -22,17 +23,25 @@ from Blp.HistoricalData import NonTradingDayFillOption, OverrideOption
 from Blp.HistoricalData import Periodicity, PeriodicityAdjustment
 from Blp.HistoricalData import PricingOption
 from Blp.ReferenceData import ReferenceDataResponse
-from opendate import Date, DateTime, Time, Timezone
-from System import DateOnly, DateTimeOffset, Object, String, TimeOnly, TimeSpan
+from Blp.Subscriptions import SubscriptionStatus as NetSubscriptionStatus
+from Blp.Subscriptions import TopicState as NetTopicState
+from Blp.Subscriptions import TopicStatus
+from Microsoft.Extensions.Logging import EventId, LogLevel
+from opendate import LCL, Date, DateTime, Time, Timezone
+from System import DateOnly, DateTimeOffset, Func, Object, String, TimeOnly
+from System import TimeSpan
 from System.Collections.Generic import Dictionary, IReadOnlyDictionary
 from System.Collections.Generic import IReadOnlyList, List
+from System.Threading import Timeout
 from System.Threading.Tasks import Task, TaskCompletionSource
 
 import blp.client
 from blp.client import Blp, FieldError, RequestFieldError
 from blp.client import RequestSecurityError, RequestTimeoutError
 from blp.client import ResponseError, SecurityError, SessionError
-from blp.client import dispose_live_clients, live_clients, to_python
+from blp.client import SessionNotAvailableError, Subscription
+from blp.client import SubscriptionStatus, TopicState, dispose_live_clients
+from blp.client import live_clients, to_python
 
 TOKYO = Timezone('Asia/Tokyo')
 
@@ -933,3 +942,230 @@ def test_bql_empty_result_keeps_its_columns(monkeypatch):
     assert df['ID'].tolist() == ['IBM US Equity', 'MSFT US Equity']
     assert df['px_last'].isna().all()
     assert result.request.field_errors == []
+
+
+class StubSubscription:
+    """Stand-in blp-net Subscription: Start records its arguments, and each
+    call is recorded.
+    """
+
+    def __init__(self, stop_result: bool = True, status: Any = None) -> None:
+        self.stop_result = stop_result
+        self.status = status
+        self.started: list = []
+        self.calls: list = []
+
+    def Start(self, fields: Any, callback: Any, options: Any) -> Any:
+        self.started.append((list(fields), callback, options))
+        return self
+
+    def Add(self, topics: Any) -> None:
+        self.calls.append(('Add', list(topics)))
+
+    def Remove(self, topics: Any) -> None:
+        self.calls.append(('Remove', list(topics)))
+
+    def GetStatus(self) -> Any:
+        return self.status
+
+    def Stop(self, timeout: Any) -> bool:
+        self.calls.append(('Stop', timeout))
+        return self.stop_result
+
+    def Dispose(self) -> None:
+        self.calls.append(('Dispose',))
+
+
+def subscribe(
+    monkeypatch: pytest.MonkeyPatch,
+    stub: StubSubscription,
+    *args: Any,
+    **kwargs: Any) -> Subscription:
+    """Subscription whose start returns stub.
+    """
+    monkeypatch.setattr(blp.client, 'NetSubscription', stub)
+    return Subscription(*args, **kwargs)
+
+
+def test_subscription_reads_on_tick_at_each_tick(monkeypatch):
+    """Verify each tick reaches the on_tick set at that moment, with each
+    value converted.
+
+    Mutation: on_tick captured at construction, so a caller that swaps it
+        keeps the old one, or a row handed over with .NET values.
+    Oracle: two ticks around a swap of on_tick; a DateTimeOffset at -05:00
+        becomes the same instant in this host's zone, and a null NaN.
+    """
+    first_rows, second_rows = [], []
+    stub = StubSubscription()
+    sub = subscribe(
+        monkeypatch,
+        stub,
+        'BID',
+        lambda topic, row: first_rows.append((topic, row)))
+    callback = stub.started[0][1]
+    stamp = DateTimeOffset(2024, 1, 2, 9, 30, 0, TimeSpan.FromHours(-5))
+    callback.Invoke('IBM US Equity', net_row(BID=161.5, TIME=stamp, ASK=None))
+    sub.on_tick = lambda topic, row: second_rows.append((topic, row))
+    callback.Invoke('MSFT US Equity', net_row(BID=410.0))
+    assert [topic for topic, _ in first_rows] == ['IBM US Equity']
+    assert [topic for topic, _ in second_rows] == ['MSFT US Equity']
+    row = first_rows[0][1]
+    assert row['BID'] == 161.5
+    assert row['TIME'] == DateTime(2024, 1, 2, 14, 30, tzinfo=Timezone('UTC'))
+    assert row['TIME'].tzinfo == LCL
+    assert math.isnan(row['ASK'])
+
+
+def test_subscription_options_and_gaps(monkeypatch):
+    """Verify fields, interval and the identity key reach Start, topics go
+    as a list, and a Python blp argument blp-net lacks raises TypeError.
+
+    Mutation: a str field or topic iterated letter by letter, the interval
+        sent in minutes, or a **kwargs catch-all that drops host.
+    Oracle: 'BID' is one field and 'IBM US Equity' one topic; 0.5 s is
+        TimeSpan.FromSeconds(0.5).
+    """
+    stub = StubSubscription()
+    sub = subscribe(
+        monkeypatch,
+        stub,
+        'BID',
+        print,
+        0.5,
+        application_identity_key='key')
+    fields, _, options = stub.started[0]
+    assert fields == ['BID']
+    assert options.Interval == TimeSpan.FromSeconds(0.5)
+    assert options.ApplicationIdentityKey == 'key'
+    sub.add('IBM US Equity')
+    sub.remove(['IBM US Equity', 'MSFT US Equity'])
+    assert stub.calls == [
+        ('Add', ['IBM US Equity']),
+        ('Remove', ['IBM US Equity', 'MSFT US Equity']),
+        ]
+    with pytest.raises(TypeError):
+        subscribe(monkeypatch, StubSubscription(), 'BID', print, 0, 'localhost')
+    with pytest.raises(TypeError):
+        subscribe(monkeypatch, StubSubscription(), 'BID', print, desired_timezone=TOKYO)
+
+
+def test_subscription_status_shape(monkeypatch):
+    """Verify status() copies blp-net's status into the Python blp's
+    dataclasses, with the topic status in lower case and times in UTC.
+
+    Mutation: the status left as the enum, a missing time turned to NaN,
+        a time left in its own offset, two counters crossed, or failure or
+        connected dropped.
+    Oracle: a hand-built status: one failed topic with no times, one
+        subscribed topic stamped 09:30 at -05:00, which is 14:30 UTC.
+    """
+    stamp = DateTimeOffset(2024, 1, 2, 9, 30, 0, TimeSpan.FromHours(-5))
+    topics = Dictionary[String, NetTopicState]()
+    failed = NetTopicState('BAD US Equity')
+    failed.Status = TopicStatus.Failed
+    failed.Reason = 'Unknown security'
+    topics['BAD US Equity'] = failed
+    live = NetTopicState('IBM US Equity')
+    live.Status = TopicStatus.Subscribed
+    live.SubscribedAt = stamp
+    live.LastTickAt = stamp
+    live.TicksLastMinute = 7
+    topics['IBM US Equity'] = live
+    failure = 'all 1 topics failed: Unknown security'
+    status = NetSubscriptionStatus(
+        failure,
+        False,
+        2,
+        'IBM US Equity: Error: boom',
+        topics)
+    sub = subscribe(monkeypatch, StubSubscription(status=status), 'BID', print)
+    utc_stamp = DateTime(2024, 1, 2, 14, 30, tzinfo=Timezone('UTC'))
+    assert sub.status() == SubscriptionStatus(
+        failure,
+        False,
+        2,
+        'IBM US Equity: Error: boom',
+        {
+            'BAD US Equity': TopicState(
+                'BAD US Equity', 'failed', 'Unknown security', None, None, None, 0),
+            'IBM US Equity': TopicState(
+                'IBM US Equity', 'subscribed', None, utc_stamp, None, utc_stamp, 7),
+            })
+    assert sub.status().topics['IBM US Equity'].subscribed_at.tzinfo == Timezone('UTC')
+
+
+@pytest.mark.parametrize('released', [True, False])
+def test_subscription_stop_and_the_exit_hook(monkeypatch, released):
+    """Verify leaving a with block stops the subscription, and the exit
+    hook stops it again only when that stop did not release the session.
+
+    Mutation: __exit__ that skips stop, or a stop that timed out or began
+        from on_tick taken out of the exit hook, which leaves the session
+        undisposed.
+    Oracle: a stub whose Stop returns released; its Dispose count at exit.
+    """
+    stub = StubSubscription(stop_result=released)
+    with subscribe(monkeypatch, stub, 'BID', print):
+        pass
+    assert stub.calls == [('Stop', TimeSpan.FromSeconds(10))]
+    dispose_live_clients()
+    assert (('Dispose',) in stub.calls) is not released
+
+
+def test_subscription_none_timeout_and_interval(monkeypatch):
+    """Verify stop(None) waits without limit and interval None leaves
+    updates unconflated.
+
+    Mutation: None passed to TimeSpan.FromSeconds, which raises TypeError.
+    Oracle: the Python blp's Event.wait(None) and its skip of a falsy
+        interval.
+    """
+    stub = StubSubscription()
+    sub = subscribe(monkeypatch, stub, 'BID', print, None)
+    assert stub.started[0][2].Interval == TimeSpan.Zero
+    assert sub.stop(None)
+    assert stub.calls == [('Stop', Timeout.InfiniteTimeSpan)]
+
+
+def test_subscription_logs_to_python(monkeypatch, caplog):
+    """Verify a blp-net log line reaches the blp.client logger at its level,
+    with the exception's text after it.
+
+    Mutation: a level mapped wrong, such as Warning to INFO, the line sent
+        to another logger, or the exception dropped.
+    Oracle: two lines written through the logger handed to Start.
+    """
+    stub = StubSubscription()
+    subscribe(monkeypatch, stub, 'BID', print)
+    net_logger = stub.started[0][2].Logger
+    formatter = Func[String, System.Exception, String](lambda state, _: state)
+    error = System.InvalidOperationException('boom')
+    caplog.set_level(logging.DEBUG, logger='blp.client')
+    net_logger.Log[String](LogLevel.Warning, EventId(3), 'Connection down', None, formatter)
+    net_logger.Log[String](LogLevel.Error, EventId(8), 'Error on IBM', error, formatter)
+    assert [
+        (record.name, record.levelno, record.getMessage()) for record in caplog.records
+        ] == [
+        ('blp.client', logging.WARNING, 'Connection down'),
+        ('blp.client', logging.ERROR, f'Error on IBM\n{error}'),
+        ]
+
+
+def test_subscription_add_errors_translate(monkeypatch):
+    """Verify a blp-net session error from add() raises its Python class.
+
+    Mutation: add() called outside translated_errors, which raises the .NET
+        SessionNotAvailableException.
+    Oracle: the Python blp's SessionNotAvailableError for a session not
+        started.
+    """
+    stub = StubSubscription()
+    sub = subscribe(monkeypatch, stub, 'BID', print)
+
+    def refuse(topics):
+        raise SessionNotAvailableException('The session is not started.')
+
+    stub.Add = refuse
+    with pytest.raises(SessionNotAvailableError):
+        sub.add('IBM US Equity')
