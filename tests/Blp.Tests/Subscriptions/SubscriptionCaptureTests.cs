@@ -30,7 +30,7 @@ public class SubscriptionCaptureTests
     /// float, or TIME left as text.
     /// Oracle: three IBM messages of the subscription capture: the initial paint
     /// with all six fields, a trade with VOLUME only, and a bid quote with BID only.
-    /// The TIME value is a wall clock read in the host's zone, so it comes back
+    /// The TIME value is a wall clock read in the clock's zone, so it comes back
     /// unshifted.
     /// </remarks>
     [Fact]
@@ -79,6 +79,37 @@ public class SubscriptionCaptureTests
         Assert.Equal(
             new Dictionary<string, object?> { ["VOLUME"] = 2109016L }, run.Ticks[1].Row);
         Assert.Equal(new Dictionary<string, object?> { ["BID"] = 233.04 }, run.Ticks[2].Row);
+    }
+
+    /// <summary>
+    /// A tick's date-time is read in the clock's local zone and returned in it.
+    /// </summary>
+    /// <remarks>
+    /// Mutation: the zone taken from TimeZoneInfo.Local in place of the clock, for the
+    /// read or for the result.
+    /// Oracle: 13:44:16 on 2026-11-17 in Tokyo is 13:44:16 +09:00, worked by hand.
+    /// Tokyo differs from any host zone in use and has no daylight saving.
+    /// </remarks>
+    [Fact]
+    public void TickDateTimeTakesTheClockZone()
+    {
+        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 11, 17, 5, 0, 0, TimeSpan.Zero));
+        clock.SetLocalTimeZone(TimeZoneInfo.FindSystemTimeZoneById("Asia/Tokyo"));
+        var run = new Run(clock: clock);
+        run.Subscription.Add(Ibm);
+        var id = run.Ids()[Ibm];
+
+        Action<IMessageFormatter> trade = tick =>
+        {
+            SetEventType(tick, "TRADE", "NEW");
+            tick.SetElement(Name.GetName("TIME"), new Datetime(2026, 11, 17, 13, 44, 16, 0));
+        };
+
+        run.Deliver(CapturedMarketDataEvents.Data((id, trade)));
+
+        var time = Assert.IsType<DateTimeOffset>(Assert.Single(run.Ticks).Row["TIME"]);
+        Assert.Equal(new DateTimeOffset(2026, 11, 17, 13, 44, 16, TimeSpan.FromHours(9)), time);
+        Assert.Equal(TimeSpan.FromHours(9), time.Offset);
     }
 
     /// <summary>
@@ -240,7 +271,14 @@ public class SubscriptionCaptureTests
     {
         private Bloomberglp.Blpapi.EventHandler? _handler;
 
-        public Run(SubscriptionOptions? options = null) =>
+        /// <summary>Starts the subscription.</summary>
+        /// <param name="options">
+        /// Subscription settings. Null takes the defaults.
+        /// </param>
+        /// <param name="clock">
+        /// The clock. Null takes a new fake clock, whose local zone is UTC.
+        /// </param>
+        public Run(SubscriptionOptions? options = null, FakeTimeProvider? clock = null) =>
             Subscription = Subscription.Start(
                 _fields,
                 (topic, row) => Ticks.Add((topic, row)),
@@ -250,7 +288,7 @@ public class SubscriptionCaptureTests
                     _handler = handler;
                     return Session;
                 },
-                new FakeTimeProvider());
+                clock ?? new FakeTimeProvider());
 
         public RecordingSession Session { get; } = new();
 

@@ -63,11 +63,11 @@ public sealed partial class Subscription : IDisposable
         _timeProvider = timeProvider;
         _logger = options.Logger;
         _parser = new ElementParser(
-            TimeZoneInfo.Local,
+            timeProvider.LocalTimeZone,
             forceString: false,
             timeAsDateTime: false,
             timeProvider,
-            assumedTimeZone: TimeZoneInfo.Local,
+            assumedTimeZone: timeProvider.LocalTimeZone,
             datesTimeAtLatestPast: true);
         _session = sessionFactory(
             SdkSession.CreateOptions(options.ApplicationIdentityKey),
@@ -137,7 +137,10 @@ public sealed partial class Subscription : IDisposable
     /// <param name="sessionFactory">
     /// Creates the session from its options and event handler.
     /// </param>
-    /// <param name="timeProvider">Clock for tick times and the no-data rule.</param>
+    /// <param name="timeProvider">
+    /// Clock for tick times and the no-data rule. Its local zone is the zone the
+    /// terminal sends times in and the zone of each tick's date-time or time.
+    /// </param>
     /// <returns>The started subscription.</returns>
     internal static Subscription Start(
         IReadOnlyList<string> fields,
