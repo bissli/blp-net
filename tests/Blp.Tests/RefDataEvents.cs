@@ -20,6 +20,16 @@ internal static class RefDataEvents
               <response>Response</response>
               <responseSelection>HistoricalDataResponse</responseSelection>
             </operation>
+            <operation name="IntradayTickRequest" serviceId="84">
+              <request>IntradayTickRequest</request>
+              <response>Response</response>
+              <responseSelection>IntradayTickResponse</responseSelection>
+            </operation>
+            <operation name="IntradayBarRequest" serviceId="84">
+              <request>IntradayBarRequest</request>
+              <response>Response</response>
+              <responseSelection>IntradayBarResponse</responseSelection>
+            </operation>
           </service>
           <schema>
             <sequenceType name="ReferenceDataRequest">
@@ -50,7 +60,61 @@ internal static class RefDataEvents
             <choiceType name="Response">
               <element name="ReferenceDataResponse" type="ReferenceDataResponseType"/>
               <element name="HistoricalDataResponse" type="HistoricalDataResponseType"/>
+              <element name="IntradayTickResponse" type="IntradayTickResponseType"/>
+              <element name="IntradayBarResponse" type="IntradayBarResponseType"/>
             </choiceType>
+            <sequenceType name="IntradayTickRequest">
+              <element name="security" type="String"/>
+              <element name="eventTypes" type="String" maxOccurs="unbounded"/>
+              <element name="startDateTime" type="Datetime"/>
+              <element name="endDateTime" type="Datetime"/>
+              <element name="includeActionCodes" type="Boolean" minOccurs="0" maxOccurs="1"/>
+              <element name="includeBicMicCodes" type="Boolean" minOccurs="0" maxOccurs="1"/>
+              <element name="includeBrokerCodes" type="Boolean" minOccurs="0" maxOccurs="1"/>
+              <element name="includeConditionCodes" type="Boolean" minOccurs="0" maxOccurs="1"/>
+              <element name="includeEqRefPrice" type="Boolean" minOccurs="0" maxOccurs="1"/>
+              <element name="includeIndicatorCodes" type="Boolean" minOccurs="0" maxOccurs="1"/>
+              <element name="includeRpsCodes" type="Boolean" minOccurs="0" maxOccurs="1"/>
+              <element name="includeTradeDate" type="Boolean" minOccurs="0" maxOccurs="1"/>
+              <element name="includeTradeTime" type="Boolean" minOccurs="0" maxOccurs="1"/>
+            </sequenceType>
+            <sequenceType name="IntradayBarRequest">
+              <element name="security" type="String"/>
+              <element name="eventType" type="String"/>
+              <element name="startDateTime" type="Datetime"/>
+              <element name="endDateTime" type="Datetime"/>
+              <element name="interval" type="Int32"/>
+            </sequenceType>
+            <sequenceType name="IntradayTickResponseType">
+              <element name="responseError" type="ErrorInfo" minOccurs="0" maxOccurs="1"/>
+              <element name="tickData" type="TickDataArray"/>
+            </sequenceType>
+            <sequenceType name="TickDataArray">
+              <element name="tickData" type="Tick" minOccurs="0" maxOccurs="unbounded"/>
+            </sequenceType>
+            <sequenceType name="Tick">
+              <element name="time" type="Datetime"/>
+              <element name="type" type="String"/>
+              <element name="value" type="Float64"/>
+              <element name="size" type="Int32"/>
+              <element name="conditionCodes" type="String" minOccurs="0" maxOccurs="1"/>
+            </sequenceType>
+            <sequenceType name="IntradayBarResponseType">
+              <element name="responseError" type="ErrorInfo" minOccurs="0" maxOccurs="1"/>
+              <element name="barData" type="BarDataArray"/>
+            </sequenceType>
+            <sequenceType name="BarDataArray">
+              <element name="barTickData" type="Bar" minOccurs="0" maxOccurs="unbounded"/>
+            </sequenceType>
+            <sequenceType name="Bar">
+              <element name="time" type="Datetime"/>
+              <element name="open" type="Float64"/>
+              <element name="high" type="Float64"/>
+              <element name="low" type="Float64"/>
+              <element name="close" type="Float64"/>
+              <element name="volume" type="Int64"/>
+              <element name="numEvents" type="Int32"/>
+            </sequenceType>
             <sequenceType name="HistoricalDataResponseType">
               <element name="responseError" type="ErrorInfo" minOccurs="0" maxOccurs="1"/>
               <element name="securityData" type="HistoricalSecurityData"/>
@@ -115,7 +179,7 @@ internal static class RefDataEvents
     public static Service Service => _service;
 
     /// <summary>An event holding one response message of an operation.</summary>
-    /// <param name="operation">ReferenceDataRequest or HistoricalDataRequest.</param>
+    /// <param name="operation">An operation name, such as ReferenceDataRequest.</param>
     /// <param name="eventType">PARTIAL_RESPONSE or RESPONSE.</param>
     /// <param name="responseXml">The message as a &lt;Response&gt; element.</param>
     /// <param name="correlationId">The id the message answers. Null sets none.</param>

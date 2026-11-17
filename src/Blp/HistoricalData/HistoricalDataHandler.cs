@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Text.Json;
 using Bloomberglp.Blpapi;
 using Blp.Internal;
 
@@ -33,10 +32,12 @@ internal sealed class HistoricalDataHandler(HistoricalDataRequest request) : IRe
 
         bloombergRequest.Set(ElementNames.StartDate, BloombergDate(_request.Start));
         bloombergRequest.Set(ElementNames.EndDate, BloombergDate(_request.End));
-        bloombergRequest.Set(ElementNames.PeriodicitySelection, BloombergName(_request.Period));
+        bloombergRequest.Set(
+            ElementNames.PeriodicitySelection, ElementNames.BloombergName(_request.Period));
         if (_request.PeriodAdjustment is { } adjustment)
         {
-            bloombergRequest.Set(ElementNames.PeriodicityAdjustment, BloombergName(adjustment));
+            bloombergRequest.Set(
+                ElementNames.PeriodicityAdjustment, ElementNames.BloombergName(adjustment));
         }
 
         if (_request.Currency is { } currency)
@@ -47,23 +48,27 @@ internal sealed class HistoricalDataHandler(HistoricalDataRequest request) : IRe
         if (_request.OverrideOption is { } overrideOption)
         {
             bloombergRequest.Set(
-                ElementNames.OverrideOption, "OVERRIDE_OPTION_" + BloombergName(overrideOption));
+                ElementNames.OverrideOption,
+                "OVERRIDE_OPTION_" + ElementNames.BloombergName(overrideOption));
         }
 
         if (_request.PricingOption is { } pricingOption)
         {
             bloombergRequest.Set(
-                ElementNames.PricingOption, "PRICING_OPTION_" + BloombergName(pricingOption));
+                ElementNames.PricingOption,
+                "PRICING_OPTION_" + ElementNames.BloombergName(pricingOption));
         }
 
         if (_request.NonTradingDayFillOption is { } fillOption)
         {
-            bloombergRequest.Set(ElementNames.NonTradingDayFillOption, BloombergName(fillOption));
+            bloombergRequest.Set(
+                ElementNames.NonTradingDayFillOption, ElementNames.BloombergName(fillOption));
         }
 
         if (_request.NonTradingDayFillMethod is { } fillMethod)
         {
-            bloombergRequest.Set(ElementNames.NonTradingDayFillMethod, BloombergName(fillMethod));
+            bloombergRequest.Set(
+                ElementNames.NonTradingDayFillMethod, ElementNames.BloombergName(fillMethod));
         }
 
         if (_request.MaxDataPoints is { } maxDataPoints)
@@ -111,14 +116,6 @@ internal sealed class HistoricalDataHandler(HistoricalDataRequest request) : IRe
     /// <returns>The response.</returns>
     public HistoricalDataResponse ToResponse() =>
         new(_rowsBySecurity, _securityErrors, _fieldErrors);
-
-    /// <summary>
-    /// The Bloomberg enumeration value of an option, such as SEMI_ANNUALLY.
-    /// </summary>
-    /// <param name="option">An option enum value.</param>
-    /// <returns>The value's name in upper snake case.</returns>
-    internal static string BloombergName(Enum option) =>
-        JsonNamingPolicy.SnakeCaseUpper.ConvertName(option.ToString());
 
     private static string BloombergDate(DateOnly date) =>
         date.ToString("yyyyMMdd", CultureInfo.InvariantCulture);

@@ -1,6 +1,8 @@
 using Bloomberglp.Blpapi;
 using Blp.HistoricalData;
 using Blp.Internal;
+using Blp.IntradayBars;
+using Blp.IntradayTicks;
 using Blp.ReferenceData;
 
 namespace Blp;
@@ -142,6 +144,56 @@ public sealed class BlpClient : IDisposable
         HistoricalDataRequest request, CancellationToken cancellationToken = default)
     {
         var handler = new HistoricalDataHandler(request);
+        await SendAsync(handler, cancellationToken).ConfigureAwait(false);
+        return handler.ToResponse();
+    }
+
+    /// <summary>
+    /// Sends an intraday tick request and waits for its full response.
+    /// </summary>
+    /// <param name="request">The request.</param>
+    /// <param name="cancellationToken">
+    /// Abandons the request. A token with a deadline sets a limit on the whole
+    /// response.
+    /// </param>
+    /// <returns>
+    /// One name-to-value row per tick, in time order. A name one tick lacks holds null.
+    /// </returns>
+    /// <exception cref="RequestTimeoutException">The idle timeout passed.</exception>
+    /// <exception cref="SessionNotAvailableException">
+    /// The session is not started, or Bloomberg reported a dead connection or a missing
+    /// service.
+    /// </exception>
+    /// <exception cref="SessionTerminatedException">The session terminated.</exception>
+    /// <exception cref="ResponseException">Bloomberg failed the request.</exception>
+    public async Task<IReadOnlyList<IReadOnlyDictionary<string, object?>>> GetIntradayTicksAsync(
+        IntradayTickRequest request, CancellationToken cancellationToken = default)
+    {
+        var handler = new IntradayTickHandler(request);
+        await SendAsync(handler, cancellationToken).ConfigureAwait(false);
+        return handler.ToResponse();
+    }
+
+    /// <summary>
+    /// Sends an intraday bar request and waits for its full response.
+    /// </summary>
+    /// <param name="request">The request.</param>
+    /// <param name="cancellationToken">
+    /// Abandons the request. A token with a deadline sets a limit on the whole
+    /// response.
+    /// </param>
+    /// <returns>One name-to-value row per bar, in time order.</returns>
+    /// <exception cref="RequestTimeoutException">The idle timeout passed.</exception>
+    /// <exception cref="SessionNotAvailableException">
+    /// The session is not started, or Bloomberg reported a dead connection or a missing
+    /// service.
+    /// </exception>
+    /// <exception cref="SessionTerminatedException">The session terminated.</exception>
+    /// <exception cref="ResponseException">Bloomberg failed the request.</exception>
+    public async Task<IReadOnlyList<IReadOnlyDictionary<string, object?>>> GetIntradayBarsAsync(
+        IntradayBarRequest request, CancellationToken cancellationToken = default)
+    {
+        var handler = new IntradayBarHandler(request);
         await SendAsync(handler, cancellationToken).ConfigureAwait(false);
         return handler.ToResponse();
     }

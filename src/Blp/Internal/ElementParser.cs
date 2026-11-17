@@ -277,19 +277,27 @@ internal sealed partial class ElementParser(
     internal static string? OptionalString(Element parent, Name name) =>
         parent.HasElement(name) ? parent.GetElementAsString(name) : null;
 
-    // A row that omits a subelement holds null under its name, as a Python frame does.
-    private List<IReadOnlyDictionary<string, object?>> SequenceAsRows(Element sequence)
+    /// <summary>Each subelement of row, name to value.</summary>
+    /// <param name="row">One entry of a SEQUENCE array.</param>
+    /// <returns>The values, as <see cref="ToValue"/> returns them.</returns>
+    public Dictionary<string, object?> RowValues(Element row) =>
+        row.Elements.ToDictionary(subelement => subelement.Name.ToString(), ToValue);
+
+    /// <summary>rows with every name any row holds, as a Python frame has.</summary>
+    /// <param name="rows">Rows of name to value.</param>
+    /// <returns>New rows. A name a row lacks holds null.</returns>
+    public static List<IReadOnlyDictionary<string, object?>> WithEveryName(
+        IReadOnlyList<IReadOnlyDictionary<string, object?>> rows)
     {
-        var rows = Rows(sequence)
-            .Select(row => row.Elements.ToDictionary(
-                subelement => subelement.Name.ToString(), ToValue))
-            .ToList();
         var names = rows.SelectMany(row => row.Keys).Distinct().ToList();
         return
         [
             .. rows.Select(row => names.ToDictionary(name => name, row.GetValueOrDefault)),
         ];
     }
+
+    private List<IReadOnlyDictionary<string, object?>> SequenceAsRows(Element sequence) =>
+        WithEveryName([.. Rows(sequence).Select(RowValues)]);
 
     /// <summary>A DATETIME or TIME value, read as UTC, in timeZone.</summary>
     /// <param name="value">The value. Any zone offset it carries is ignored.</param>
