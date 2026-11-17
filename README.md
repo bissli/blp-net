@@ -1,7 +1,9 @@
 # blp-net
 
-A C# client for the Bloomberg API. It runs on Bloomberg's managed .NET SDK
-and talks to the terminal on the local host.
+A C# client for the Bloomberg API, with Python bindings. It runs on
+Bloomberg's managed .NET SDK and talks to the terminal on the local host.
+The `blp` Python package in `python/` calls the same library through
+pythonnet (see Python package).
 
 The library covers reference data (BDP), historical data (BDH),
 intraday ticks and bars, saved equity screens (EQS), BQL queries and live
