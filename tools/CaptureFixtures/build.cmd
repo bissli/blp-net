@@ -7,5 +7,4 @@ set "OUT=%LOCALAPPDATA%\blp-net\CaptureFixtures"
 dotnet publish "%~dp0CaptureFixtures.csproj" -c Release -o "%OUT%"
 if errorlevel 1 exit /b %errorlevel%
 echo.
-echo Built "%OUT%\CaptureFixtures.exe". Run it from the repo root:
-echo   "%OUT%\CaptureFixtures.exe" --help
+echo Built "%OUT%\CaptureFixtures.exe".

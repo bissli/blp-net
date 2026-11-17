@@ -15,7 +15,7 @@ const string Usage = """
     and two subscriptions, and writes manifest.json, one <service>.schema.txt per service
     and cases/<name>.json per case. A case that fails records its error and the run goes on.
 
-    Usage: dotnet run --project tools/CaptureFixtures -- [options]
+    Usage: tools\CaptureFixtures\capture.cmd [options]
 
     Options:
       --out-dir <path>             Output folder. Default: ./blp-fixtures

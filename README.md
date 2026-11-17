@@ -27,7 +27,9 @@ the local application data folder: `%LOCALAPPDATA%` on Windows,
 two checkouts never share output. Dropbox locks the files it syncs, so
 a build inside a Dropbox checkout fails. On Windows,
 `tools\CaptureFixtures\build.cmd` publishes the fixture capture tool to
-`%LOCALAPPDATA%\blp-net\CaptureFixtures`.
+`%LOCALAPPDATA%\blp-net\CaptureFixtures`, and
+`tools\CaptureFixtures\capture.cmd` builds it and runs it from the repo
+root, which writes the fixtures to `blp-fixtures\`.
 
 ## Bloomberg SDK package
 
