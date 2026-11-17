@@ -22,13 +22,14 @@ public class ElementParserTests
         """);
 
     /// <summary>
-    /// TrimNumber reproduces libb round_digit_string with places=None.
+    /// TrimNumber writes a number in plain form with no trailing zero, and keeps the
+    /// trimmed text of a number whose plain form needs more than 28 digits.
     /// </summary>
     /// <remarks>
     /// Mutation: exponent output ("G" format), no trim, a zero for an underflow, or
-    /// a rounded value where round_digit_string keeps the text.
-    /// Oracle: round_digit_string run on each input
-    /// (.handoff/csharp-port/probes/trim_oracle.py).
+    /// a rounded value past the 28-digit limit.
+    /// Oracle: a separate reference implementation run on each input, with inputs at
+    /// and past the 28-digit limit.
     /// </remarks>
     [Theory]
     [InlineData("7283.0", "7283")]
@@ -46,7 +47,7 @@ public class ElementParserTests
     [InlineData("1E+30", "1E+30")]
     [InlineData("inf", "inf")]
     [InlineData(" abc ", "abc")]
-    public void TrimNumberMatchesRoundDigitString(string text, string expected) =>
+    public void TrimNumberWritesPlainForm(string text, string expected) =>
         Assert.Equal(expected, ElementParser.TrimNumber(text));
 
     /// <summary>

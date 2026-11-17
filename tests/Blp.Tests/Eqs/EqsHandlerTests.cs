@@ -46,7 +46,7 @@ public class EqsHandlerTests
     /// <remarks>
     /// Mutation: another default type or group, an override sent with no as-of date,
     /// or an empty group sent.
-    /// Oracle: the defaults of the screener call this port follows.
+    /// Oracle: the defaults EqsRequest declares, Global and "General".
     /// </remarks>
     [Fact]
     public void DefaultsSendGlobalGeneralAndEmptyGroupSendsNone()

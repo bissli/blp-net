@@ -37,7 +37,6 @@ internal sealed partial class ElementParser(
     TimeZoneInfo? assumedTimeZone = null,
     bool datesTimeAtLatestPast = false)
 {
-    // libb round_digit_string keeps the text of a number past this many digits.
     private const int MaxPlainDigits = 28;
 
     // A last-update stamp this far ahead of the host clock is taken as clock skew.
