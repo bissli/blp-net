@@ -30,6 +30,11 @@ internal static class RefDataEvents
               <response>Response</response>
               <responseSelection>IntradayBarResponse</responseSelection>
             </operation>
+            <operation name="BeqsRequest" serviceId="84">
+              <request>BeqsRequest</request>
+              <response>Response</response>
+              <responseSelection>BeqsResponse</responseSelection>
+            </operation>
           </service>
           <schema>
             <sequenceType name="ReferenceDataRequest">
@@ -67,7 +72,33 @@ internal static class RefDataEvents
               <element name="HistoricalDataResponse" type="HistoricalDataResponseType"/>
               <element name="IntradayTickResponse" type="IntradayTickResponseType"/>
               <element name="IntradayBarResponse" type="IntradayBarResponseType"/>
+              <element name="BeqsResponse" type="BeqsResponseType"/>
             </choiceType>
+            <sequenceType name="BeqsRequest">
+              <element name="screenName" type="String"/>
+              <element name="screenType" type="String"/>
+              <element name="Group" type="String" minOccurs="0" maxOccurs="1"/>
+              <element name="overrides" type="FieldOverride" minOccurs="0" maxOccurs="unbounded"/>
+            </sequenceType>
+            <sequenceType name="BeqsResponseType">
+              <element name="responseError" type="ErrorInfo" minOccurs="0" maxOccurs="1"/>
+              <element name="data" type="BeqsData" minOccurs="0" maxOccurs="1"/>
+            </sequenceType>
+            <sequenceType name="BeqsData">
+              <element name="securityData" type="BeqsSecurityData"
+                minOccurs="0" maxOccurs="unbounded"/>
+            </sequenceType>
+            <sequenceType name="BeqsSecurityData">
+              <element name="security" type="String"/>
+              <element name="securityError" type="ErrorInfo" minOccurs="0" maxOccurs="1"/>
+              <element name="fieldExceptions" type="FieldException"
+                minOccurs="0" maxOccurs="unbounded"/>
+              <element name="fieldData" type="BeqsFieldData" minOccurs="0" maxOccurs="1"/>
+            </sequenceType>
+            <sequenceType name="BeqsFieldData">
+              <element name="Ticker" type="String" minOccurs="0" maxOccurs="1"/>
+              <element name="PX_LAST" type="Float64" minOccurs="0" maxOccurs="1"/>
+            </sequenceType>
             <sequenceType name="IntradayTickRequest">
               <element name="security" type="String"/>
               <element name="eventTypes" type="String" maxOccurs="unbounded"/>

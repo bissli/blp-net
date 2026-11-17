@@ -15,6 +15,7 @@ internal static class ElementNames
     public static readonly Name CalendarCodeOverride = Name.GetName("calendarCodeOverride");
     public static readonly Name Category = Name.GetName("category");
     public static readonly Name Currency = Name.GetName("currency");
+    public static readonly Name Data = Name.GetName("data");
     public static readonly Name Date = Name.GetName("date");
     public static readonly Name Description = Name.GetName("description");
     public static readonly Name EndDate = Name.GetName("endDate");
@@ -26,6 +27,7 @@ internal static class ElementNames
     public static readonly Name FieldExceptions = Name.GetName("fieldExceptions");
     public static readonly Name FieldId = Name.GetName("fieldId");
     public static readonly Name Fields = Name.GetName("fields");
+    public static readonly Name Group = Name.GetName("Group");
     public static readonly Name IncludeActionCodes = Name.GetName("includeActionCodes");
     public static readonly Name IncludeBicMicCodes = Name.GetName("includeBicMicCodes");
     public static readonly Name IncludeBrokerCodes = Name.GetName("includeBrokerCodes");
@@ -47,6 +49,8 @@ internal static class ElementNames
     public static readonly Name PricingOption = Name.GetName("pricingOption");
     public static readonly Name Reason = Name.GetName("reason");
     public static readonly Name ResponseError = Name.GetName("responseError");
+    public static readonly Name ScreenName = Name.GetName("screenName");
+    public static readonly Name ScreenType = Name.GetName("screenType");
     public static readonly Name Securities = Name.GetName("securities");
     public static readonly Name Security = Name.GetName("security");
     public static readonly Name SecurityData = Name.GetName("securityData");

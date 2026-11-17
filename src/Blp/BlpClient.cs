@@ -1,4 +1,5 @@
 using Bloomberglp.Blpapi;
+using Blp.Eqs;
 using Blp.HistoricalData;
 using Blp.Internal;
 using Blp.IntradayBars;
@@ -227,6 +228,35 @@ public sealed class BlpClient : IDisposable
         IntradayBarRequest request, CancellationToken cancellationToken = default)
     {
         var handler = new IntradayBarHandler(request);
+        await SendAsync(handler, request.IdleTimeout, request.TotalTimeout, cancellationToken)
+            .ConfigureAwait(false);
+        return handler.ToResponse();
+    }
+
+    /// <summary>
+    /// Runs a saved equity screen (EQS) and waits for its full response.
+    /// </summary>
+    /// <param name="request">The request.</param>
+    /// <param name="cancellationToken">
+    /// Abandons the request. A token with a deadline sets a limit on the whole
+    /// response.
+    /// </param>
+    /// <returns>The response.</returns>
+    /// <exception cref="RequestTimeoutException">
+    /// The idle or total timeout passed.
+    /// </exception>
+    /// <exception cref="SessionNotAvailableException">
+    /// The session is not started, or Bloomberg reported a dead connection or a missing
+    /// service.
+    /// </exception>
+    /// <exception cref="SessionTerminatedException">The session terminated.</exception>
+    /// <exception cref="ResponseException">
+    /// Bloomberg failed the request, as for an unknown screen.
+    /// </exception>
+    public async Task<EqsResponse> GetScreenerAsync(
+        EqsRequest request, CancellationToken cancellationToken = default)
+    {
+        var handler = new EqsHandler(request);
         await SendAsync(handler, request.IdleTimeout, request.TotalTimeout, cancellationToken)
             .ConfigureAwait(false);
         return handler.ToResponse();
