@@ -41,11 +41,11 @@ public class SubscriptionLoggingTests
     }
 
     /// <summary>
-    /// Connection, event-queue and session events each log at the Python blp's level.
+    /// Connection, event-queue and session events each log their own line and level.
     /// </summary>
     /// <remarks>
     /// Mutation: a branch dropped, or connection down logged as information.
-    /// Oracle: the levels and text of the Python blp's Subscription._on_other_event.
+    /// Oracle: a hand-written level and line for each event type, in delivery order.
     /// </remarks>
     [Fact]
     public void SessionEventsLogAtTheirLevels()
