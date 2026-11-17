@@ -4,9 +4,10 @@ A C# client for the Bloomberg API. It runs on Bloomberg's managed .NET SDK
 and talks to the terminal on the local host.
 
 The library covers reference data (BDP), historical data (BDH),
-intraday ticks and bars, saved equity screens (EQS) and live market data
-subscriptions. Date-time values come back in the request's time zone, and `ForceString`
-gives each number as plain text with trailing zeros dropped.
+intraday ticks and bars, saved equity screens (EQS), BQL queries and live
+market data subscriptions. Date-time values come back in the request's
+time zone, and `ForceString` gives each number as plain text with trailing
+zeros dropped.
 
 ## Requirements
 
@@ -69,6 +70,7 @@ checks it with one reference data request. One client serves any number
 of concurrent requests.
 
 ```csharp
+using Blp.Bql;
 using Blp.Eqs;
 using Blp.IntradayBars;
 using Blp.IntradayTicks;
@@ -87,12 +89,25 @@ foreach (var (security, columns) in screen.Values)
 {
     Console.WriteLine($"{security} {columns.Count}");
 }
+
+var bql = await client.GetBqlAsync(
+    new BqlRequest("get(px_last) for(['IBM US Equity', 'AAPL US Equity'])"));
+foreach (var row in bql.Results["px_last"])
+{
+    Console.WriteLine($"{row["ID"]} {row["px_last"]} {row["DATE"]}");
+}
 ```
 
 Intraday ticks and bars come back as one name-to-value row per tick or
 bar, in time order. An EQS response keys each security's columns by the
 names the screen sends. A screen saved under the user's own login takes
 `ScreenType = EqsScreenType.Private`.
+
+A BQL response holds one table per result, keyed by the result's name as
+Bloomberg sends it. Each row holds `ID`, the value under the result's
+name, then each secondary column, such as `DATE` and `CURRENCY`. A BQL
+error appears in `Errors`. The first BQL call opens `//blp/bqlsvc`, so a
+host without BQL still connects.
 
 ```csharp
 using Blp.Subscriptions;
