@@ -42,6 +42,13 @@ one package to the folder. Every other package restores from nuget.org.
 A newer SDK goes into `packages/` and takes a matching version in
 `src/Blp/Blp.csproj`.
 
+## License
+
+blp-net is under the MIT license in `LICENSE`. The Bloomberg SDK in
+`packages/` is Bloomberg's, under the `License.txt` inside its package,
+which allows redistribution with that notice. The Python wheel carries
+the notice beside its copy of `Bloomberglp.Blpapi.dll`.
+
 ## Usage
 
 ```csharp

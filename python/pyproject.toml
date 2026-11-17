@@ -3,6 +3,7 @@ name = "blp"
 version = "0.1.0"
 description = "The blp API over the blp-net .NET library, through pythonnet"
 authors = ["bissli"]
+license = "MIT"
 packages = [{ include = "blp", from = "src" }]
 
 [tool.poetry.dependencies]
