@@ -162,3 +162,25 @@ which defaults to no limit.
 Bloomberg sends date-times and times in UTC. The request's `TimeZone`,
 `TimeZoneInfo.Local` by default, sets the zone of the returned values.
 A time alone takes this host's current date before conversion.
+
+## Python package
+
+`python/` holds `blp`, a Python package over this library through
+pythonnet. It keeps the Python blp import name and API. `Blp` offers
+`get_reference_data` and `get_historical`, whose responses give the
+same `as_dict` and `as_dataframe` shapes, with opendate dates and times.
+A keyword the library lacks, such as `decimal_places`, raises
+`TypeError`.
+
+Importing `blp` loads `Blp.dll` from the directory that `BLP_NET_DIR`
+names. `dotnet publish` writes that directory, which lies outside the
+Dropbox checkout for the reason Build gives. `DOTNET_ROOT` names the
+.NET 10 install where pythonnet cannot find it. Poetry keeps the
+virtual environment in its cache.
+
+```bash
+dotnet publish src/Blp -c Release -o /tmp/blp-net-lib
+cd python
+poetry install
+BLP_NET_DIR=/tmp/blp-net-lib poetry run pytest
+```

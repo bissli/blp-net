@@ -1,0 +1,24 @@
+[tool.poetry]
+name = "blp"
+version = "0.1.0"
+description = "The blp API over the blp-net .NET library, through pythonnet"
+authors = ["bissli"]
+packages = [{ include = "blp", from = "src" }]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.16"
+pythonnet = ">=3.2.1"
+pandas = "*"
+numpy = "*"
+opendate = ">=0.1.50"
+
+[tool.poetry.group.test.dependencies]
+pytest = "*"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-p no:cacheprovider"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
