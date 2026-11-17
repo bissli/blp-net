@@ -186,7 +186,10 @@ the package's `lib` folder and builds the wheel, in a staging directory
 outside the checkout. It writes the wheel to `/tmp/blp-wheel`, or to the
 directory its one argument names. The wheel holds managed code only, so
 a wheel built on Linux installs on Windows too. The host that imports
-`blp` needs the .NET 10 runtime, and the build host the .NET 10 SDK.
+`blp` needs the .NET 10 runtime, and the build host the .NET 10 SDK
+and poetry. The `build` GitHub Actions workflow runs the C# tests, builds
+the wheel and runs the Python tests against it on Linux and Windows, and
+keeps each wheel as a run artifact.
 
 ```bash
 python/build-wheel.sh
