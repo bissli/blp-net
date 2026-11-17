@@ -5,4 +5,7 @@
   <Folder Name="/tests/">
     <Project Path="tests/Blp.Tests/Blp.Tests.csproj" />
   </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/CaptureFixtures/CaptureFixtures.csproj" />
+  </Folder>
 </Solution>
