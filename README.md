@@ -169,16 +169,35 @@ A time alone takes this host's current date before conversion.
 
 `python/` holds `blp`, a Python package over this library through
 pythonnet. It keeps the Python blp import name and API. `Blp` offers
-`get_reference_data` and `get_historical`, whose responses give the
+`get_reference_data`, `get_historical`, `get_intraday_tick`,
+`get_intraday_bar`, `get_screener` and `bql`, whose responses give the
 same `as_dict` and `as_dataframe` shapes, with opendate dates and times.
-A keyword the library lacks, such as `decimal_places`, raises
-`TypeError`.
+`Subscription` streams live market data. A keyword the library lacks,
+such as `decimal_places`, raises `TypeError`.
 
 Importing `blp` loads `Blp.dll` from the directory that `BLP_NET_DIR`
-names. `dotnet publish` writes that directory, which lies outside the
-Dropbox checkout for the reason Build gives. `DOTNET_ROOT` names the
-.NET 10 install where pythonnet cannot find it. Poetry keeps the
-virtual environment in its cache.
+names, else from the `lib` folder inside the installed package.
+`DOTNET_ROOT` names the .NET 10 install where pythonnet cannot find it.
+
+### Installation
+
+`python/build-wheel.sh` publishes `Blp.dll` with its dependencies into
+the package's `lib` folder and builds the wheel, in a staging directory
+outside the checkout. It writes the wheel to `/tmp/blp-wheel`, or to the
+directory its one argument names. The wheel holds managed code only, so
+a wheel built on Linux installs on Windows too. The host that imports
+`blp` needs the .NET 10 runtime, and the build host the .NET 10 SDK.
+
+```bash
+python/build-wheel.sh
+pip install --force-reinstall /tmp/blp-wheel/blp-0.1.0-py3-none-any.whl
+```
+
+### Tests
+
+The tests load a separate `dotnet publish` output through `BLP_NET_DIR`,
+which lies outside the Dropbox checkout for the reason Build gives.
+Poetry keeps the virtual environment in its cache.
 
 ```bash
 dotnet publish src/Blp -c Release -o /tmp/blp-net-lib
