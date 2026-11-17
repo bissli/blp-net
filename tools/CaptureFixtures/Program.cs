@@ -23,6 +23,7 @@ const string Usage = """
                                    weekday before today.
       --subscribe-seconds <n>      Seconds to collect per subscription. Default: 60
       --eqs-screen <name>          Global or saved EQS screen. Default: Core Capital Ratios
+      --eqs-screen-type <type>     GLOBAL, or PRIVATE for a saved screen. Default: GLOBAL
       --help                       Print this text.
 
     Run it on a weekday during US market hours so the subscriptions receive live ticks.
@@ -34,6 +35,7 @@ var day = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(-1);
 while (day.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday) day = day.AddDays(-1);
 double subscribeSeconds = 60;
 var eqsScreen = "Core Capital Ratios";
+string eqsScreenType = "GLOBAL";
 for (var index = 0; index < args.Length; index++)
 {
     switch (args[index])
@@ -52,6 +54,9 @@ for (var index = 0; index < args.Length; index++)
             break;
         case "--eqs-screen" when index + 1 < args.Length:
             eqsScreen = args[++index];
+            break;
+        case "--eqs-screen-type" when index + 1 < args.Length:
+            eqsScreenType = args[++index];
             break;
         default:
             Console.Error.WriteLine($"Unknown or incomplete option: {args[index]}\n\n{Usage}");
@@ -109,7 +114,7 @@ void Capture(string name, Action<JsonObject> capture)
 }
 
 var correlationId = 1;
-foreach (var captureCase in Cases.Build(day, eqsScreen))
+foreach (var captureCase in Cases.Build(day, eqsScreen, eqsScreenType))
 {
     var id = correlationId++;
     Capture(captureCase.Name, record => recorder.CaptureRequest(captureCase, id, record));

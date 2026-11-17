@@ -56,11 +56,16 @@ internal static class Cases
     /// <summary>Every request case, in the order they are sent.</summary>
     /// <param name="day">Trading day the intraday cases read.</param>
     /// <param name="eqsScreen">Global or saved EQS screen name.</param>
+    /// <param name="eqsScreenType">
+    /// Bloomberg screenType of <paramref name="eqsScreen"/>: GLOBAL, or PRIVATE for a
+    /// saved screen.
+    /// </param>
     /// <returns>
     /// The cases. Each intraday window opens at 09:30 America/New_York on
     /// <paramref name="day"/>, the US equity open.
     /// </returns>
-    public static IReadOnlyList<CaptureCase> Build(DateOnly day, string eqsScreen)
+    public static IReadOnlyList<CaptureCase> Build(
+        DateOnly day, string eqsScreen, string eqsScreenType)
     {
         var sessionOpen = TimeZoneInfo.ConvertTimeToUtc(
             day.ToDateTime(new TimeOnly(9, 30)), TimeZoneInfo.FindSystemTimeZoneById(ResponseZone));
@@ -108,9 +113,18 @@ internal static class Cases
             IntradayTicks(
                 "intraday_ticks_plain", ["TRADE", "ASK", "BID"], sessionOpen,
                 TimeSpan.FromMinutes(2), withFlags: false),
-            IntradayBars("intraday_bars", sessionOpen, TimeSpan.FromMinutes(390), 5),
             IntradayBars(
-                "intraday_bars_default_interval", sessionOpen, TimeSpan.FromMinutes(30), 1),
+                "intraday_bars", "IBM US Equity", "TRADE", sessionOpen,
+                TimeSpan.FromMinutes(390), 5),
+            IntradayBars(
+                "intraday_bars_default_interval", "IBM US Equity", "TRADE", sessionOpen,
+                TimeSpan.FromMinutes(30), 1),
+            IntradayBars(
+                "intraday_bars_bid_yield", "CT10 Govt", "BID_YIELD", sessionOpen,
+                TimeSpan.FromMinutes(30), 5),
+            IntradayBars(
+                "intraday_bars_mid_price", "IBM US Equity", "MID_PRICE", sessionOpen,
+                TimeSpan.FromMinutes(30), 5),
             Bql("bql", "get(px_last) for(['IBM US Equity', 'AAPL US Equity'])"),
             Bql(
                 "bql_dates",
@@ -119,8 +133,8 @@ internal static class Cases
             Bql(
                 "bql_errors",
                 "get(not_a_field) for(['IBM US Equity', 'NOTATICKER US Equity'])"),
-            Eqs("eqs", eqsScreen),
-            Eqs("eqs_unknown_screen", "NOT A SCREEN"),
+            Eqs("eqs", eqsScreen, eqsScreenType),
+            Eqs("eqs_unknown_screen", "NOT A SCREEN", "GLOBAL"),
         ];
     }
 
@@ -175,11 +189,12 @@ internal static class Cases
         });
 
     private static CaptureCase IntradayBars(
-        string name, DateTime start, TimeSpan length, int interval) =>
+        string name, string security, string eventType, DateTime start, TimeSpan length,
+        int interval) =>
         new(name, RefDataService, "IntradayBarRequest", request =>
         {
-            request.Set(Key("security"), "IBM US Equity");
-            request.Set(Key("eventType"), "TRADE");
+            request.Set(Key("security"), security);
+            request.Set(Key("eventType"), eventType);
             request.Set(Key("startDateTime"), new Datetime(start));
             request.Set(Key("endDateTime"), new Datetime(start + length));
             request.Set(Key("interval"), interval);
@@ -192,11 +207,11 @@ internal static class Cases
             request.GetElement(Key("clientContext")).SetElement(Key("appName"), "EXCEL");
         });
 
-    private static CaptureCase Eqs(string name, string screen) =>
+    private static CaptureCase Eqs(string name, string screen, string screenType) =>
         new(name, RefDataService, "BeqsRequest", request =>
         {
             request.Set(Key("screenName"), screen);
-            request.Set(Key("screenType"), "GLOBAL");
+            request.Set(Key("screenType"), screenType);
             request.Set(Key("Group"), "General");
         });
 }
