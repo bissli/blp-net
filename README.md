@@ -20,6 +20,14 @@ dotnet build
 dotnet test
 ```
 
+`Directory.Build.props` sends all build output to `blp-net/<hash>` under
+the local application data folder: `%LOCALAPPDATA%` on Windows,
+`~/.local/share` on Linux. The hash comes from the checkout's path, so
+two checkouts never share output. Dropbox locks the files it syncs, so
+a build inside a Dropbox checkout fails. On Windows,
+`tools\CaptureFixtures\build.cmd` publishes the fixture capture tool to
+`%LOCALAPPDATA%\blp-net\CaptureFixtures`.
+
 ## Bloomberg SDK package
 
 Bloomberg does not publish its .NET SDK on nuget.org. The repo carries

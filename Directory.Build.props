@@ -6,5 +6,11 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <AnalysisMode>Recommended</AnalysisMode>
+    <!-- Dropbox locks the files it syncs, so a build inside the
+         checkout fails. The hash keeps each checkout's output apart. -->
+    <BuildRoot>$([System.Environment]::GetFolderPath(
+      SpecialFolder.LocalApplicationData, SpecialFolderOption.DoNotVerify))</BuildRoot>
+    <ArtifactsPath>$(BuildRoot)/blp-net/$([MSBuild]::StableStringHash(
+      $(MSBuildThisFileDirectory)))</ArtifactsPath>
   </PropertyGroup>
 </Project>
