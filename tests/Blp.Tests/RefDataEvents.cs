@@ -157,6 +157,7 @@ internal static class RefDataEvents
             <sequenceType name="Holder">
               <element name="name" type="String"/>
               <element name="weight" type="Float64" minOccurs="0" maxOccurs="1"/>
+              <element name="currency" type="String" minOccurs="0" maxOccurs="1"/>
             </sequenceType>
             <sequenceType name="FieldException">
               <element name="fieldId" type="String"/>

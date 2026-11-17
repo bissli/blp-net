@@ -74,6 +74,108 @@ public class RequestDispatcherTests
         Assert.IsType<RequestTimeoutException>(task.Exception?.InnerException);
     }
 
+    /// <summary>
+    /// A response past one idle limit completes the request, after a partial restarted
+    /// the timer.
+    /// </summary>
+    /// <remarks>
+    /// Mutation: the deadline not reset on PARTIAL_RESPONSE.
+    /// Oracle: the Python blp test_partial_response_restarts_idle_limit expected value.
+    /// The response at 49 s is past one 30 s limit and within 30 s of the partial at
+    /// 20 s.
+    /// </remarks>
+    [Fact]
+    public void ResponseAfterRestartedIdleTimeoutCompletes()
+    {
+        var id = new CorrelationID(1);
+        var handler = new RecordingHandler();
+        var task = _dispatcher.Register(id, handler);
+
+        _clock.Advance(TimeSpan.FromSeconds(20));
+        _dispatcher.Dispatch(Answer(Event.EventType.PARTIAL_RESPONSE, id));
+        _clock.Advance(TimeSpan.FromSeconds(29));
+        _dispatcher.Dispatch(Answer(Event.EventType.RESPONSE, id));
+
+        Assert.True(task.IsCompletedSuccessfully);
+        Assert.Equal(2, handler.EventCount);
+    }
+
+    /// <summary>A steady partial stream finishes, as no total limit ends it.</summary>
+    /// <remarks>
+    /// Mutation: a partial that does not restart the idle timeout, or a default total
+    /// limit, which ends the stream before its response.
+    /// Oracle: the Python blp test_no_total_limit_lets_steady_stream_finish expected
+    /// value. A partial every 5 s under an 8 s idle limit, 20 times, then a response:
+    /// 21 events.
+    /// </remarks>
+    [Fact]
+    public void SteadyPartialStreamFinishesUnderIdleLimit()
+    {
+        var dispatcher = new RequestDispatcher(TimeSpan.FromSeconds(8), _clock);
+        var id = new CorrelationID(1);
+        var handler = new RecordingHandler();
+        var task = dispatcher.Register(id, handler);
+
+        for (int partial = 0; partial < 20; partial++)
+        {
+            _clock.Advance(TimeSpan.FromSeconds(5));
+            dispatcher.Dispatch(Answer(Event.EventType.PARTIAL_RESPONSE, id));
+        }
+
+        _clock.Advance(TimeSpan.FromSeconds(5));
+        dispatcher.Dispatch(Answer(Event.EventType.RESPONSE, id));
+
+        Assert.True(task.IsCompletedSuccessfully);
+        Assert.Equal(21, handler.EventCount);
+    }
+
+    /// <summary>
+    /// A partial response for another request leaves the idle limit alone.
+    /// </summary>
+    /// <remarks>
+    /// Mutation: the timer reset before the correlation id check.
+    /// Oracle: the Python blp test_stale_partial_does_not_restart_idle_limit expected
+    /// value. The stale partial at 20 s of a 30 s limit changes nothing, so the limit
+    /// still expires at 30 s.
+    /// </remarks>
+    [Fact]
+    public void StalePartialDoesNotRestartTheIdleTimeout()
+    {
+        var task = _dispatcher.Register(new CorrelationID(1), new RecordingHandler());
+
+        _clock.Advance(TimeSpan.FromSeconds(20));
+        _dispatcher.Dispatch(Answer(Event.EventType.PARTIAL_RESPONSE, new CorrelationID(2)));
+        _clock.Advance(TimeSpan.FromSeconds(10) - TimeSpan.FromTicks(1));
+        Assert.False(task.IsCompleted);
+        _clock.Advance(TimeSpan.FromTicks(1));
+
+        Assert.IsType<RequestTimeoutException>(task.Exception?.InnerException);
+    }
+
+    /// <summary>
+    /// A stale response is skipped, and the request's own is processed.
+    /// </summary>
+    /// <remarks>
+    /// Mutation: the correlation id filter dropped, so the stale response ends the
+    /// request or feeds its handler.
+    /// Oracle: the Python blp test_stale_response_is_skipped expected value. The
+    /// handler receives exactly one event.
+    /// </remarks>
+    [Fact]
+    public void StaleResponseIsSkipped()
+    {
+        var id = new CorrelationID(1);
+        var handler = new RecordingHandler();
+        var task = _dispatcher.Register(id, handler);
+
+        _dispatcher.Dispatch(Answer(Event.EventType.RESPONSE, new CorrelationID(2)));
+        Assert.False(task.IsCompleted);
+        _dispatcher.Dispatch(Answer(Event.EventType.RESPONSE, id));
+
+        Assert.True(task.IsCompletedSuccessfully);
+        Assert.Equal(1, handler.EventCount);
+    }
+
     /// <summary>A response for no pending request is dropped.</summary>
     /// <remarks>
     /// Mutation: the first pending request handed any response, or an exception for an
@@ -129,6 +231,51 @@ public class RequestDispatcherTests
         if (error is ResponseException response) Assert.Equal(category, response.Category);
     }
 
+    /// <summary>
+    /// A RequestFailure for a bad request is a response failure, which no
+    /// SessionException is.
+    /// </summary>
+    /// <remarks>
+    /// Mutation: every RequestFailure raised as a session error, which a caller would
+    /// read as a lost session.
+    /// Oracle: the Python blp test_bad_request_failure_is_not_session_error expected
+    /// value, a BAD_ARGS failure.
+    /// </remarks>
+    [Fact]
+    public void BadRequestFailureIsNotASessionError()
+    {
+        var id = new CorrelationID(1);
+        var task = _dispatcher.Register(id, new RecordingHandler());
+
+        _dispatcher.Dispatch(Failure("BAD_ARGS", id));
+
+        var error = Assert.IsType<ResponseException>(task.Exception?.InnerException);
+        Assert.Equal("BAD_ARGS", error.Category);
+        Assert.IsNotType<SessionException>(error, exactMatch: false);
+    }
+
+    /// <summary>A RequestFailure for another request does not fail this one.</summary>
+    /// <remarks>
+    /// Mutation: a REQUEST_STATUS failure that fails the first pending request, or a
+    /// CONNECTION_DEAD status that fails every request before the id check.
+    /// Oracle: the Python blp test_stale_failure_is_skipped expected value. A stale
+    /// CONNECTION_DEAD failure, then this request's response completes it.
+    /// </remarks>
+    [Fact]
+    public void StaleFailureIsSkipped()
+    {
+        var id = new CorrelationID(1);
+        var handler = new RecordingHandler();
+        var task = _dispatcher.Register(id, handler);
+
+        _dispatcher.Dispatch(Failure("CONNECTION_DEAD", new CorrelationID(2)));
+        Assert.False(task.IsCompleted);
+        _dispatcher.Dispatch(Answer(Event.EventType.RESPONSE, id));
+
+        Assert.True(task.IsCompletedSuccessfully);
+        Assert.Equal(1, handler.EventCount);
+    }
+
     /// <summary>SessionTerminated fails every pending request.</summary>
     /// <remarks>
     /// Mutation: only the first request failed, or a SESSION_STATUS event ignored.
@@ -169,6 +316,21 @@ public class RequestDispatcherTests
     private static Event Answer(Event.EventType eventType, CorrelationID id) =>
         RefDataEvents.Response(
             "ReferenceDataRequest", eventType, "<Response><securityData/></Response>", id);
+
+    private static Event Failure(string category, CorrelationID id) =>
+        RefDataEvents.Admin(
+            Event.EventType.REQUEST_STATUS,
+            $"""
+            <RequestFailure>
+              <reason>
+                <source>test</source>
+                <errorCode>1</errorCode>
+                <category>{category}</category>
+                <description>failed</description>
+              </reason>
+            </RequestFailure>
+            """,
+            id);
 
     private sealed class RecordingHandler(Exception? failure = null) : IRequestHandler
     {

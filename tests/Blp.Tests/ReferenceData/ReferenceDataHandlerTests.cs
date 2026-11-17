@@ -138,6 +138,71 @@ public class ReferenceDataHandlerTests
         Assert.Equal("DAILY_LIMIT", error.Subcategory);
     }
 
+    /// <summary>
+    /// A message holding a responseError raises ResponseException, which no
+    /// SessionException is.
+    /// </summary>
+    /// <remarks>
+    /// Mutation: a bare Exception raised, or ResponseException under SessionException,
+    /// which a caller would read as a lost session.
+    /// Oracle: the Python blp test_response_error_is_typed expected value. The C#
+    /// text adds the element dump after the "REQUEST FAILED: " prefix.
+    /// </remarks>
+    [Fact]
+    public void ResponseErrorIsNotASessionError()
+    {
+        var handler = new ReferenceDataHandler(_request);
+        var responseEvent = RefDataEvents.Response(
+            "ReferenceDataRequest",
+            Event.EventType.RESPONSE,
+            "<Response><responseError><category>BAD_SEC</category></responseError></Response>");
+
+        var error = Assert.Throws<ResponseException>(() => handler.ProcessResponse(responseEvent));
+
+        Assert.StartsWith("REQUEST FAILED: ", error.Message);
+        Assert.Contains("BAD_SEC", error.Message);
+        Assert.IsNotType<SessionException>(error, exactMatch: false);
+    }
+
+    /// <summary>
+    /// ForceString and TimeAsDateTime reach the response and add no override to the
+    /// request.
+    /// </summary>
+    /// <remarks>
+    /// Mutation: either option sent to Bloomberg as an override, or ForceString or
+    /// TimeAsDateTime not passed on to the parser.
+    /// Oracle: the Python blp test_reference_data_passes_string_options expected value,
+    /// no overrides, the text of a number, and a time read as a date-time.
+    /// </remarks>
+    [Fact]
+    public void StringOptionsAreNotSentAsOverrides()
+    {
+        var request = _request with { ForceString = true, TimeAsDateTime = true };
+        var handler = new ReferenceDataHandler(request);
+
+        var sent = handler.CreateRequest(RefDataEvents.Service);
+        handler.ProcessResponse(OneSecurity(Event.EventType.RESPONSE, "7283.0"));
+
+        Assert.Equal(0, sent.GetElement(Name.GetName("overrides")).NumValues);
+        Assert.Equal("7283", Assert.Single(handler.ToResponse().Values).Value["PX_LAST"]);
+
+        var timeHandler = new ReferenceDataHandler(
+            _request with { Fields = ["LAST_TIME"], TimeAsDateTime = true });
+        timeHandler.ProcessResponse(RefDataEvents.Response(
+            "ReferenceDataRequest",
+            Event.EventType.RESPONSE,
+            """
+            <Response>
+              <securityData>
+                <security>IBM US Equity</security>
+                <fieldData><LAST_TIME>14:30:00.000</LAST_TIME></fieldData>
+              </securityData>
+            </Response>
+            """));
+        var values = Assert.Single(timeHandler.ToResponse().Values).Value;
+        Assert.IsType<DateTimeOffset>(values["LAST_TIME"]);
+    }
+
     private static Event OneSecurity(Event.EventType eventType, string price) =>
         RefDataEvents.Response(
             "ReferenceDataRequest",

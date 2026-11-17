@@ -124,6 +124,64 @@ public class HistoricalDataHandlerTests
         Assert.Equal("VOLUME", Assert.Single(response.FieldErrors).Field);
     }
 
+    /// <summary>A historical field error is kept in full, beside the values.</summary>
+    /// <remarks>
+    /// Mutation: the field errors of a historical securityData element dropped, or the
+    /// message and subcategory left out of the record.
+    /// Oracle: the Python blp test_historical_field_error_recorded expected FieldError
+    /// and PX_LAST value.
+    /// </remarks>
+    [Fact]
+    public void FieldErrorIsRecorded()
+    {
+        var handler = new HistoricalDataHandler(
+            _request with { Fields = ["PX_LAST", "BAD_FIELD"] });
+
+        handler.ProcessResponse(HistoricalResponse(
+            Event.EventType.RESPONSE,
+            """
+            <securityData>
+              <security>IBM US Equity</security>
+              <fieldExceptions>
+                <fieldId>BAD_FIELD</fieldId>
+                <errorInfo>
+                  <category>BAD_FLD</category>
+                  <message>Field not valid</message>
+                  <subcategory>INVALID_FIELD</subcategory>
+                </errorInfo>
+              </fieldExceptions>
+              <fieldData><date>2024-01-02</date><PX_LAST>161.5</PX_LAST></fieldData>
+            </securityData>
+            """));
+        var response = handler.ToResponse();
+
+        Assert.Equal(
+            new FieldError(
+                "IBM US Equity", "BAD_FIELD", "BAD_FLD", "Field not valid", "INVALID_FIELD"),
+            Assert.Single(response.FieldErrors));
+        var row = Assert.Single(response.Rows["IBM US Equity"]);
+        Assert.Equal(161.5, row.Values["PX_LAST"]);
+    }
+
+    /// <summary>A date sends the calendar date it holds, for start and end.</summary>
+    /// <remarks>
+    /// Mutation: the start or end date sent a day off, as a conversion through a
+    /// DateTime at midnight in another zone would.
+    /// Oracle: the Python blp test_historical_date_in_own_timezone expected value for
+    /// its date(2024, 1, 2) input. The string and datetime inputs have no C# form.
+    /// </remarks>
+    [Fact]
+    public void DateIsSentAsItsOwnCalendarDate()
+    {
+        var day = new DateOnly(2024, 1, 2);
+
+        var sent = new HistoricalDataHandler(_request with { Start = day, End = day })
+            .CreateRequest(RefDataEvents.Service);
+
+        Assert.Equal("20240102", Text(sent, "startDate"));
+        Assert.Equal("20240102", Text(sent, "endDate"));
+    }
+
     private static string Text(Request request, string name) =>
         request.GetElement(Name.GetName(name)).GetValueAsString();
 

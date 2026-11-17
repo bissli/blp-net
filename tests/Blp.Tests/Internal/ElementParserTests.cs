@@ -186,6 +186,154 @@ public class ElementParserTests
             new TimeOnly(19, 30), parser.SubelementValue(fieldData, Name.GetName("LAST_TIME")));
     }
 
+    /// <summary>A time alone is returned as a time in the parser's zone.</summary>
+    /// <remarks>
+    /// Mutation: the zone conversion dropped, which returns 01:40:51.
+    /// Oracle: the Python blp test_time_only_as_time_in_desired_timezone expected
+    /// value, 01:40:51Z at -04:00 is 21:40:51. A fixed offset stands in for New York,
+    /// because the C# parser dates a time alone with the host's date.
+    /// </remarks>
+    [Fact]
+    public void TimeAloneIsATimeInTheZone()
+    {
+        var minusFour = TimeZoneInfo.CreateCustomTimeZone(
+            "Test-4", TimeSpan.FromHours(-4), "Test-4", "Test-4");
+        var parser = new ElementParser(minusFour, forceString: false, timeAsDateTime: false);
+        var fieldData = RefDataEvents.FieldData("<LAST_TIME>01:40:51.000</LAST_TIME>");
+
+        Assert.Equal(
+            new TimeOnly(21, 40, 51), parser.SubelementValue(fieldData, Name.GetName("LAST_TIME")));
+    }
+
+    /// <summary>
+    /// A string element comes back as sent, even where it reads as a number.
+    /// </summary>
+    /// <remarks>
+    /// Mutation: a string element parsed as a number under forceString, which drops the
+    /// leading zero of the first CUSIP.
+    /// Oracle: the Python blp test_string_identifier_kept_verbatim expected value, the
+    /// input CUSIP.
+    /// </remarks>
+    [Theory]
+    [InlineData("046433108", true)]
+    [InlineData("046433108", false)]
+    [InlineData("36831E108", true)]
+    [InlineData("36831E108", false)]
+    public void StringIdentifierIsKeptVerbatim(string cusip, bool forceString)
+    {
+        var parser = new ElementParser(_plusFive, forceString, timeAsDateTime: false);
+        var fieldData = RefDataEvents.FieldData($"<NAME>{cusip}</NAME>");
+
+        Assert.Equal(cusip, parser.SubelementValue(fieldData, Name.GetName("NAME")));
+    }
+
+    /// <summary>
+    /// A string element loses surrounding whitespace and keeps its digits.
+    /// </summary>
+    /// <remarks>
+    /// Mutation: the string rounded as a number, which returns "1.5".
+    /// Oracle: the Python blp test_string_value_stripped_and_not_rounded expected
+    /// value, " 1.50 " trimmed to "1.50".
+    /// </remarks>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void StringValueIsStrippedAndNotRounded(bool forceString)
+    {
+        var parser = new ElementParser(_plusFive, forceString, timeAsDateTime: false);
+        var fieldData = RefDataEvents.FieldData("<NAME> 1.50 </NAME>");
+
+        Assert.Equal("1.50", parser.SubelementValue(fieldData, Name.GetName("NAME")));
+    }
+
+    /// <summary>
+    /// A number under forceString still has its trailing zeros dropped.
+    /// </summary>
+    /// <remarks>
+    /// Mutation: rounding dropped for every type, so "7283.0" keeps its ".0".
+    /// Oracle: the Python blp test_numeric_element_still_rounded_under_force_string
+    /// expected value, "7283.0" to "7283". The 1.23 half needs decimal_places, which
+    /// the C# port dropped.
+    /// </remarks>
+    [Fact]
+    public void NumberIsStillRoundedUnderForceString()
+    {
+        var parser = new ElementParser(_plusFive, forceString: true, timeAsDateTime: false);
+        var fieldData = RefDataEvents.FieldData("<PX_LAST>7283.0</PX_LAST>");
+
+        Assert.Equal("7283", parser.SubelementValue(fieldData, Name.GetName("PX_LAST")));
+    }
+
+    /// <summary>
+    /// A bulk field's JSON keeps a string subelement and rounds a number.
+    /// </summary>
+    /// <remarks>
+    /// Mutation: the string subelement parsed as a number, which turns the CUSIP into
+    /// "46433108", or rounding dropped, which leaves "0.2500".
+    /// Oracle: the Python blp test_bulk_field_json_rounds_only_numeric_subelements
+    /// expected value.
+    /// </remarks>
+    [Fact]
+    public void BulkFieldJsonRoundsOnlyNumericSubelements()
+    {
+        var parser = new ElementParser(_plusFive, forceString: true, timeAsDateTime: false);
+        var fieldData = RefDataEvents.FieldData(
+            "<HOLDERS><name>046433108</name><weight>0.2500</weight></HOLDERS>");
+
+        Assert.Equal(
+            """[{"name": "046433108"}, {"weight": "0.25"}]""",
+            parser.SubelementValue(fieldData, Name.GetName("HOLDERS")));
+    }
+
+    /// <summary>
+    /// A bulk field whose rows omit different subelements has every name in every row.
+    /// </summary>
+    /// <remarks>
+    /// Mutation: names taken from the first row only, which drops currency, first seen
+    /// in the last row.
+    /// Oracle: the Python blp test_bulk_field_dataframe_rows_with_different_fields
+    /// expected frame, null where a row omits a field. The weight is a number here,
+    /// where the Python test sent it as text.
+    /// </remarks>
+    [Fact]
+    public void BulkRowsWithDifferentSubelementsShareEveryName()
+    {
+        var parser = new ElementParser(_plusFive, forceString: false, timeAsDateTime: false);
+        var fieldData = RefDataEvents.FieldData("""
+            <HOLDERS><name>046433108</name><weight>0.25</weight></HOLDERS>
+            <HOLDERS><name>009066101</name></HOLDERS>
+            <HOLDERS>
+              <name>00164V103</name><weight>0.30</weight><currency>USD</currency>
+            </HOLDERS>
+            """);
+
+        var rows = Assert.IsType<List<IReadOnlyDictionary<string, object?>>>(
+            parser.SubelementValue(fieldData, Name.GetName("HOLDERS")));
+        Dictionary<string, object?> first = new()
+        {
+            ["name"] = "046433108",
+            ["weight"] = 0.25,
+            ["currency"] = null,
+        };
+        Dictionary<string, object?> second = new()
+        {
+            ["name"] = "009066101",
+            ["weight"] = null,
+            ["currency"] = null,
+        };
+        Dictionary<string, object?> third = new()
+        {
+            ["name"] = "00164V103",
+            ["weight"] = 0.30,
+            ["currency"] = "USD",
+        };
+        Assert.Equal(first, rows[0]);
+        Assert.Equal(second, rows[1]);
+        Assert.Equal(third, rows[2]);
+        Assert.Equal(3, rows.Count);
+        Assert.All(rows, row => Assert.Equal(["name", "weight", "currency"], row.Keys));
+    }
+
     /// <summary>
     /// A date-time on either side of a DST change takes the offset opendate gives.
     /// </summary>
