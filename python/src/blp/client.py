@@ -430,6 +430,10 @@ def to_python(value: Any, zone: Timezone) -> Any:
     """
     if value is None:
         return np.nan
+    # Checked before the .NET types: an isinstance test against a
+    # pythonnet class is slow, and most values arrive as plain floats.
+    if isinstance(value, (float, int, str)):
+        return value
     if isinstance(value, DateOnly):
         return Date(value.Year, value.Month, value.Day)
     if isinstance(value, DateTimeOffset):
