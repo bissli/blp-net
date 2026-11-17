@@ -3,12 +3,12 @@ using Bloomberglp.Blpapi;
 namespace Blp.Internal;
 
 /// <summary>
-/// Builds one //blp/refdata request and collects its response events.
+/// Builds one request and collects its response events.
 /// </summary>
 internal interface IRequestHandler
 {
     /// <summary>The Bloomberg request to send.</summary>
-    /// <param name="service">The opened //blp/refdata service.</param>
+    /// <param name="service">The opened service the request belongs to.</param>
     /// <returns>A filled-in request.</returns>
     Request CreateRequest(Service service);
 

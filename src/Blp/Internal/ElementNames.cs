@@ -10,10 +10,12 @@ internal static class ElementNames
     public static readonly Name AdjustmentFollowDpdf = Name.GetName("adjustmentFollowDPDF");
     public static readonly Name AdjustmentNormal = Name.GetName("adjustmentNormal");
     public static readonly Name AdjustmentSplit = Name.GetName("adjustmentSplit");
+    public static readonly Name AppName = Name.GetName("appName");
     public static readonly Name BarData = Name.GetName("barData");
     public static readonly Name BarTickData = Name.GetName("barTickData");
     public static readonly Name CalendarCodeOverride = Name.GetName("calendarCodeOverride");
     public static readonly Name Category = Name.GetName("category");
+    public static readonly Name ClientContext = Name.GetName("clientContext");
     public static readonly Name Currency = Name.GetName("currency");
     public static readonly Name Data = Name.GetName("data");
     public static readonly Name Date = Name.GetName("date");
@@ -23,6 +25,7 @@ internal static class ElementNames
     public static readonly Name ErrorInfo = Name.GetName("errorInfo");
     public static readonly Name EventType = Name.GetName("eventType");
     public static readonly Name EventTypes = Name.GetName("eventTypes");
+    public static readonly Name Expression = Name.GetName("expression");
     public static readonly Name FieldData = Name.GetName("fieldData");
     public static readonly Name FieldExceptions = Name.GetName("fieldExceptions");
     public static readonly Name FieldId = Name.GetName("fieldId");

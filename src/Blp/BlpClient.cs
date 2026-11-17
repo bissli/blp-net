@@ -1,4 +1,5 @@
 using Bloomberglp.Blpapi;
+using Blp.Bql;
 using Blp.Eqs;
 using Blp.HistoricalData;
 using Blp.Internal;
@@ -14,6 +15,7 @@ namespace Blp;
 public sealed class BlpClient : IDisposable
 {
     private const string RefDataServiceName = "//blp/refdata";
+    private const string BqlServiceName = "//blp/bqlsvc";
 
     private static readonly ReferenceDataRequest _connectivityProbe =
         new(["IBM US Equity"], ["ID_BB_GLOBAL"]);
@@ -21,6 +23,8 @@ public sealed class BlpClient : IDisposable
     private readonly IBlpSession _session;
     private readonly RequestDispatcher _dispatcher;
     private readonly Service _refDataService;
+    private readonly Lock _bqlServiceLock = new();
+    private Service? _bqlService;
 
     private BlpClient(IBlpSession session, RequestDispatcher dispatcher, Service refDataService)
     {
@@ -139,7 +143,8 @@ public sealed class BlpClient : IDisposable
         ReferenceDataRequest request, CancellationToken cancellationToken = default)
     {
         var handler = new ReferenceDataHandler(request);
-        await SendAsync(handler, request.IdleTimeout, request.TotalTimeout, cancellationToken)
+        await SendAsync(
+            handler, _refDataService, request.IdleTimeout, request.TotalTimeout, cancellationToken)
             .ConfigureAwait(false);
         return handler.ToResponse();
     }
@@ -172,7 +177,8 @@ public sealed class BlpClient : IDisposable
         HistoricalDataRequest request, CancellationToken cancellationToken = default)
     {
         var handler = new HistoricalDataHandler(request);
-        await SendAsync(handler, request.IdleTimeout, request.TotalTimeout, cancellationToken)
+        await SendAsync(
+            handler, _refDataService, request.IdleTimeout, request.TotalTimeout, cancellationToken)
             .ConfigureAwait(false);
         return handler.ToResponse();
     }
@@ -201,7 +207,8 @@ public sealed class BlpClient : IDisposable
         IntradayTickRequest request, CancellationToken cancellationToken = default)
     {
         var handler = new IntradayTickHandler(request);
-        await SendAsync(handler, request.IdleTimeout, request.TotalTimeout, cancellationToken)
+        await SendAsync(
+            handler, _refDataService, request.IdleTimeout, request.TotalTimeout, cancellationToken)
             .ConfigureAwait(false);
         return handler.ToResponse();
     }
@@ -228,7 +235,8 @@ public sealed class BlpClient : IDisposable
         IntradayBarRequest request, CancellationToken cancellationToken = default)
     {
         var handler = new IntradayBarHandler(request);
-        await SendAsync(handler, request.IdleTimeout, request.TotalTimeout, cancellationToken)
+        await SendAsync(
+            handler, _refDataService, request.IdleTimeout, request.TotalTimeout, cancellationToken)
             .ConfigureAwait(false);
         return handler.ToResponse();
     }
@@ -257,7 +265,40 @@ public sealed class BlpClient : IDisposable
         EqsRequest request, CancellationToken cancellationToken = default)
     {
         var handler = new EqsHandler(request);
-        await SendAsync(handler, request.IdleTimeout, request.TotalTimeout, cancellationToken)
+        await SendAsync(
+            handler, _refDataService, request.IdleTimeout, request.TotalTimeout, cancellationToken)
+            .ConfigureAwait(false);
+        return handler.ToResponse();
+    }
+
+    /// <summary>
+    /// Sends a BQL query and waits for its full response. The first call opens
+    /// //blp/bqlsvc.
+    /// </summary>
+    /// <param name="request">The request.</param>
+    /// <param name="cancellationToken">
+    /// Abandons the request. A token with a deadline sets a limit on the whole
+    /// response.
+    /// </param>
+    /// <returns>The response.</returns>
+    /// <exception cref="RequestTimeoutException">
+    /// The idle or total timeout passed.
+    /// </exception>
+    /// <exception cref="SessionNotAvailableException">
+    /// The session is not started, or Bloomberg reported a dead connection or a missing
+    /// service.
+    /// </exception>
+    /// <exception cref="SessionTerminatedException">The session terminated.</exception>
+    /// <exception cref="SessionStartException">
+    /// //blp/bqlsvc failed to open. The next call tries again.
+    /// </exception>
+    /// <exception cref="ResponseException">Bloomberg failed the request.</exception>
+    public async Task<BqlResponse> GetBqlAsync(
+        BqlRequest request, CancellationToken cancellationToken = default)
+    {
+        var handler = new BqlHandler(request);
+        await SendAsync(
+            handler, BqlService(), request.IdleTimeout, request.TotalTimeout, cancellationToken)
             .ConfigureAwait(false);
         return handler.ToResponse();
     }
@@ -272,14 +313,33 @@ public sealed class BlpClient : IDisposable
         _session.Dispose();
     }
 
+    private Service BqlService()
+    {
+        lock (_bqlServiceLock)
+        {
+            if (_bqlService is null)
+            {
+                if (!_session.OpenService(BqlServiceName))
+                {
+                    throw new SessionStartException($"Failed to open service {BqlServiceName}.");
+                }
+
+                _bqlService = _session.GetService(BqlServiceName);
+            }
+
+            return _bqlService;
+        }
+    }
+
     private async Task SendAsync(
         IRequestHandler handler,
+        Service service,
         TimeSpan? idleTimeout,
         TimeSpan? totalTimeout,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var bloombergRequest = handler.CreateRequest(_refDataService);
+        var bloombergRequest = handler.CreateRequest(service);
         var correlationId = new CorrelationID();
         var response = _dispatcher.Register(correlationId, handler, idleTimeout, totalTimeout);
         try
