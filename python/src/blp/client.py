@@ -12,15 +12,20 @@ import clr
 import numpy as np
 import pandas as pd
 import System
-from Blp import BlpClient, BlpClientOptions, RequestFieldException
-from Blp import RequestSecurityException, RequestTimeoutException
-from Blp import ResponseException, SessionCreateException, SessionException
+from Blp import BlpClient, BlpClientOptions, IntradayEventType
+from Blp import RequestFieldException, RequestSecurityException
+from Blp import RequestTimeoutException, ResponseException
+from Blp import SessionCreateException, SessionException
 from Blp import SessionNotAvailableException, SessionStartException
 from Blp import SessionTerminatedException
+from Blp.Bql import BqlRequest
+from Blp.Eqs import EqsRequest, EqsScreenType
 from Blp.HistoricalData import HistoricalDataRequest, NonTradingDayFillMethod
 from Blp.HistoricalData import NonTradingDayFillOption, OverrideOption
 from Blp.HistoricalData import Periodicity, PeriodicityAdjustment
 from Blp.HistoricalData import PricingOption
+from Blp.IntradayBars import IntradayBarRequest
+from Blp.IntradayTicks import IntradayTickRequest
 from Blp.ReferenceData import ReferenceDataRequest
 from opendate import LCL, UTC, Date, DateTime, Time, Timezone
 from System import DateOnly, DateTimeOffset, IAsyncResult, String, TimeOnly
@@ -44,6 +49,9 @@ __all__ = [
     'FieldError',
     'HistoricalDataResponse',
     'ReferenceDataResponse',
+    'IntradayResponse',
+    'EQSResponse',
+    'BQLResponse',
     ]
 
 REQUEST_IDLE_SECONDS = 120
@@ -254,6 +262,70 @@ def to_date_only(value: datetime.date | str | None) -> DateOnly | None:
         return None
     date = calendar_date(value)
     return DateOnly(date.year, date.month, date.day)
+
+
+def utc_instant(value: datetime.date | str) -> DateTime:
+    """The instant value names, in UTC.
+
+    Parameters
+    ----------
+    value : datetime.date or str
+        A date, a datetime or pandas Timestamp, or a string DateTime.parse
+        reads. A naive value, or a date, is read as UTC.
+
+    Returns
+    -------
+    DateTime
+
+    Raises
+    ------
+    ValueError
+        DateTime.parse cannot read the string.
+    """
+    if isinstance(value, datetime.date):
+        return DateTime.instance(value).in_timezone(UTC)
+    instant = DateTime.parse(value)
+    if instant is None:
+        raise ValueError(f'No date-time in {value!r}')
+    return instant.in_timezone(UTC)
+
+
+def intraday_range(
+    start: datetime.date | str | None,
+    end: datetime.date | str | None) -> tuple[DateTimeOffset, DateTimeOffset]:
+    """Start and end of an intraday request, each at offset 0.
+
+    Parameters
+    ----------
+    start : datetime.date, str or None
+        As utc_instant reads it. None, NaN or NaT means one day before end.
+    end : datetime.date, str or None
+        As utc_instant reads it. None, NaN or NaT means now.
+
+    Returns
+    -------
+    tuple[DateTimeOffset, DateTimeOffset]
+        (start, end), microseconds kept.
+
+    Raises
+    ------
+    ValueError
+        As utc_instant raises it.
+    """
+    end_utc = DateTime.now(UTC) if pd.isna(end) else utc_instant(end)
+    start_utc = end_utc.subtract(days=1) if pd.isna(start) else utc_instant(start)
+    # An offset of 0: blp-net converts a DateTime of Kind Local at the
+    # host's offset.
+    return tuple(
+        DateTimeOffset(
+            instant.year,
+            instant.month,
+            instant.day,
+            instant.hour,
+            instant.minute,
+            instant.second,
+            TimeSpan.Zero).AddTicks(instant.microsecond * 10)
+        for instant in (start_utc, end_utc))
 
 
 def to_enum(enum_type: type, name: str, prefix: str = '') -> Any:
@@ -509,6 +581,137 @@ class HistoricalDataResponse:
             self.response_map.values(),
             keys=self.response_map.keys(),
             axis=1)
+
+
+class IntradayResponse:
+    """Intraday ticks or bars of one security, in time order.
+
+    Parameters
+    ----------
+    rows : IReadOnlyList[IReadOnlyDictionary[str, object]]
+        The blp-net rows. Every row holds every name any row has.
+    zone : Timezone
+        The request's zone.
+
+    Attributes
+    ----------
+    rows : list[dict]
+        One dict per tick or bar, each value converted by to_python.
+    """
+
+    def __init__(self, rows: Any, zone: Timezone) -> None:
+        self.rows = [
+            {pair.Key: to_python(pair.Value, zone) for pair in row}
+            for row in rows
+            ]
+
+    def as_dict(self) -> dict:
+        """Not supported: a row list has no key to index it by.
+
+        Raises
+        ------
+        NotImplementedError
+            Always.
+        """
+        raise NotImplementedError('Intraday rows have no dict form; use as_dataframe')
+
+    def as_dataframe(self) -> pd.DataFrame:
+        """One row per tick or bar under a RangeIndex. No rows gives an
+        empty frame with no columns.
+        """
+        return pd.DataFrame.from_records(self.rows)
+
+
+class EQSResponse:
+    """The securities an EQS screen selects, with the screen's columns.
+
+    Parameters
+    ----------
+    response : Blp.Eqs.EqsResponse
+        The blp-net response.
+    zone : Timezone
+        The request's zone.
+
+    Attributes
+    ----------
+    request : SimpleNamespace
+        security_errors and field_errors, as on ReferenceDataResponse.
+    """
+
+    def __init__(self, response: Any, zone: Timezone) -> None:
+        self.response_map: defaultdict[str, dict] = defaultdict(dict)
+        for pair in response.Values:
+            self.response_map[pair.Key] = {
+                column.Key: to_python(column.Value, zone) for column in pair.Value
+                }
+        self.request = SimpleNamespace(
+            security_errors=security_errors(response.SecurityErrors),
+            field_errors=field_errors(response.FieldErrors))
+
+    def as_dict(self) -> defaultdict[str, dict]:
+        """Security to column to value, securities in arrival order.
+        """
+        return self.response_map
+
+    def as_dataframe(self) -> pd.DataFrame:
+        """One row per security in arrival order, columns the union of the
+        screen's columns in first-seen order.
+        """
+        data = {ticker: pd.Series(row) for ticker, row in self.response_map.items()}
+        return pd.DataFrame.from_dict(data, orient='index')
+
+
+class BQLResponse:
+    """BQL results, one frame per result name.
+
+    Parameters
+    ----------
+    response : Blp.Bql.BqlResponse
+        The blp-net response.
+
+    Attributes
+    ----------
+    request : SimpleNamespace
+        security_errors, the message of each exception Bloomberg reported,
+        as str, and field_errors, always empty, as in the Python blp.
+    """
+
+    def __init__(self, response: Any) -> None:
+        self.response_map: dict[str, pd.DataFrame] = {}
+        for pair in response.Results:
+            rows = [
+                {column.Key: to_python(column.Value, UTC) for column in row}
+                for row in pair.Value
+                ]
+            # Without its columns an empty result drops out of the merge.
+            self.response_map[pair.Key] = (
+                pd.DataFrame(rows) if rows else pd.DataFrame(columns=['ID', pair.Key]))
+        self.request = SimpleNamespace(
+            security_errors=list(response.Errors),
+            field_errors=[])
+
+    def as_dict(self) -> dict[str, pd.DataFrame]:
+        """Result name to its frame: columns 'ID', the result name, then the
+        secondary columns. A DATE value is a Date and a null is NaN. A
+        result with no rows has only the 'ID' and result-name columns.
+        """
+        return self.response_map
+
+    def as_dataframe(self) -> pd.DataFrame:
+        """The frames outer-merged in order on the columns they share. A
+        frame that shares no column with the merge so far is dropped.
+        """
+        if not self.response_map:
+            return pd.DataFrame()
+        frames = list(self.response_map.values())
+        result = frames[0]
+        for df in frames[1:]:
+            common_columns = [
+                column for column in result.columns if column in df.columns
+                ]
+            if common_columns:
+                result = result.merge(df, on=common_columns, how='outer')
+        return result
 
 
 live_clients: set = set()
@@ -792,6 +995,237 @@ class Blp:
         response = wait_for(
             lambda token: self.client.GetHistoricalDataAsync(request, token))
         return HistoricalDataResponse(response, fields, zone)
+
+    def get_intraday_tick(
+        self,
+        ticker: str,
+        events: str | list[str] | None = None,
+        start: datetime.date | str | None = None,
+        end: datetime.date | str | None = None,
+        timezone: str = LCL.name,
+        include_condition_codes: bool | None = None,
+        *,
+        include_broker_codes: bool | None = None,
+        include_equity_ref_price: bool | None = None,
+        include_action_codes: bool | None = None,
+        include_indicator_codes: bool | None = None,
+        include_trade_date: bool | None = None,
+        include_trade_time: bool | None = None,
+        include_rsp_codes: bool | None = None,
+        include_bic_mic_codes: bool | None = None) -> IntradayResponse:
+        """Every tick of one security in a time range.
+
+        Parameters
+        ----------
+        ticker : str
+            Bloomberg security identifier.
+        events : str or list[str], optional
+            Bloomberg event types, such as 'TRADE' or 'BID_BEST'. None sends
+            TRADE, ASK and BID.
+        start : datetime.date, str or None
+            First instant, inclusive, as utc_instant reads it. None, NaN or
+            NaT means one day before end.
+        end : datetime.date, str or None
+            Last instant, inclusive, read as start is. None, NaN or NaT
+            means now.
+        timezone : str
+            IANA zone for date-time and time values in the response. The
+            range ignores it.
+        include_condition_codes, include_broker_codes,
+        include_equity_ref_price, include_action_codes,
+        include_indicator_codes, include_trade_date, include_trade_time,
+        include_rsp_codes, include_bic_mic_codes : bool, optional
+            Add that column to each tick. None or False adds none.
+
+        Returns
+        -------
+        IntradayResponse
+            Columns time, type, value and size, then any added column.
+
+        Raises
+        ------
+        TypeError
+            Any other Python blp flag, which blp-net lacks.
+        ValueError
+            A range bound utc_instant cannot read, or an event type outside
+            IntradayEventType.
+        ResponseError
+            Bloomberg failed the request.
+        SessionError
+            The session failed, or a limit passed (RequestTimeoutError).
+        """
+        zone = Timezone(timezone)
+        start_offset, end_offset = intraday_range(start, end)
+        request = IntradayTickRequest(ticker, start_offset, end_offset)
+        if events is not None:
+            event_types = List[IntradayEventType]()
+            for event in [events] if isinstance(events, str) else events:
+                event_types.Add(to_enum(IntradayEventType, event))
+            request.Events = event_types
+        request.IncludeConditionCodes = bool(include_condition_codes)
+        request.IncludeBrokerCodes = bool(include_broker_codes)
+        request.IncludeEquityRefPrice = bool(include_equity_ref_price)
+        request.IncludeActionCodes = bool(include_action_codes)
+        request.IncludeIndicatorCodes = bool(include_indicator_codes)
+        request.IncludeTradeDate = bool(include_trade_date)
+        request.IncludeTradeTime = bool(include_trade_time)
+        request.IncludeRpsCodes = bool(include_rsp_codes)
+        request.IncludeBicMicCodes = bool(include_bic_mic_codes)
+        request.TimeZone = TimeZoneInfo.FindSystemTimeZoneById(timezone)
+        self._apply_limits(request)
+        rows = wait_for(lambda token: self.client.GetIntradayTicksAsync(request, token))
+        return IntradayResponse(rows, zone)
+
+    def get_intraday_bar(
+        self,
+        ticker: str,
+        event: str = 'TRADE',
+        start: datetime.date | str | None = None,
+        end: datetime.date | str | None = None,
+        timezone: str = LCL.name,
+        interval: int | None = None) -> IntradayResponse:
+        """Open, high, low and close bars of one security in a time range.
+
+        Parameters
+        ----------
+        ticker : str
+            Bloomberg security identifier.
+        event : str, default 'TRADE'
+            Bloomberg event type the bars summarize, such as 'BID'.
+        start, end : datetime.date, str or None
+            As get_intraday_tick reads them.
+        timezone : str
+            IANA zone for date-time values in the response. The range
+            ignores it.
+        interval : int, optional
+            Bar length in minutes, 1 to 1440. None or 0 sends 1.
+
+        Returns
+        -------
+        IntradayResponse
+            Columns time, open, high, low, close, volume, numEvents and
+            value.
+
+        Raises
+        ------
+        TypeError
+            gap_fill_initial_bar, return_eids or an adjustment flag, which
+            blp-net lacks.
+        ValueError
+            A range bound utc_instant cannot read, or an event type outside
+            IntradayEventType.
+        ResponseError
+            Bloomberg failed the request.
+        SessionError
+            The session failed, or a limit passed (RequestTimeoutError).
+        """
+        zone = Timezone(timezone)
+        start_offset, end_offset = intraday_range(start, end)
+        request = IntradayBarRequest(ticker, start_offset, end_offset)
+        request.Event = to_enum(IntradayEventType, event)
+        if interval:
+            request.Interval = int(interval)
+        request.TimeZone = TimeZoneInfo.FindSystemTimeZoneById(timezone)
+        self._apply_limits(request)
+        rows = wait_for(lambda token: self.client.GetIntradayBarsAsync(request, token))
+        return IntradayResponse(rows, zone)
+
+    def get_screener(
+        self,
+        name: str,
+        group: str | None = 'General',
+        type: str = 'GLOBAL',
+        asof: datetime.date | str | None = None,
+        *,
+        timezone: str = LCL.name) -> EQSResponse:
+        """Equivalent of the EQS screen: the securities a screen selects.
+
+        Parameters
+        ----------
+        name : str
+            The screen's name.
+        group : str, default 'General'
+            The screen's folder. None or '' sends none.
+        type : str, default 'GLOBAL'
+            GLOBAL for a Bloomberg screen, PRIVATE for a saved one. None
+            raises ValueError.
+        asof : datetime.date, str or None
+            Runs the screen on the data of this date, as calendar_date
+            reads it. None or '' runs it on current data.
+        timezone : str
+            IANA zone for date-time and time values in the response.
+
+        Returns
+        -------
+        EQSResponse
+
+        Raises
+        ------
+        TypeError
+            language, which blp-net lacks.
+        ValueError
+            A type other than GLOBAL or PRIVATE, or a date calendar_date
+            cannot read.
+        ResponseError
+            Bloomberg failed the request.
+        SessionError
+            The session failed, or a limit passed (RequestTimeoutError).
+        """
+        zone = Timezone(timezone)
+        request = EqsRequest(name)
+        request.Group = group
+        request.ScreenType = to_enum(EqsScreenType, str(type))
+        request.AsOf = to_date_only(asof or None)
+        request.TimeZone = TimeZoneInfo.FindSystemTimeZoneById(timezone)
+        self._apply_limits(request)
+        response = wait_for(lambda token: self.client.GetScreenerAsync(request, token))
+        return EQSResponse(response, zone)
+
+    def bql(
+        self,
+        expression: str | None = None,
+        universe: str | None = None,
+        fields: str | None = None,
+        raise_security_error: bool = False) -> BQLResponse:
+        """Equivalent of the Excel BQL() function.
+
+        Parameters
+        ----------
+        expression : str, optional
+            The whole query, such as "get(px_last) for(['IBM US Equity'])".
+        universe : str, optional
+            The for() clause, used with fields when expression is None.
+        fields : str, optional
+            The get() clause, used with universe.
+        raise_security_error : bool, default False
+            Raise RequestSecurityError when Bloomberg reports an exception.
+
+        Returns
+        -------
+        BQLResponse
+
+        Raises
+        ------
+        ValueError
+            Neither expression nor both universe and fields.
+        RequestSecurityError
+            As raise_security_error sets. The text joins the messages.
+        ResponseError
+            Bloomberg failed the request.
+        SessionError
+            The session failed, or a limit passed (RequestTimeoutError).
+        """
+        if not expression:
+            if not universe or not fields:
+                raise ValueError("Either 'expression' or both 'universe' and 'fields' must be provided")
+            expression = f'get({fields}) for({universe})'
+        request = BqlRequest(expression)
+        self._apply_limits(request)
+        response = wait_for(lambda token: self.client.GetBqlAsync(request, token))
+        bql_response = BQLResponse(response)
+        if raise_security_error and bql_response.request.security_errors:
+            raise RequestSecurityError(''.join(bql_response.request.security_errors))
+        return bql_response
 
     def _apply_limits(self, request: Any) -> None:
         """Set the request's IdleTimeout and TotalTimeout from idle_seconds
