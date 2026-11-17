@@ -1,6 +1,7 @@
 using System.Globalization;
 using Bloomberglp.Blpapi;
 using Blp.Internal;
+using Microsoft.Extensions.Time.Testing;
 
 namespace Blp.Tests.Internal;
 
@@ -203,6 +204,29 @@ public class ElementParserTests
 
         Assert.Equal(
             new TimeOnly(21, 40, 51), parser.SubelementValue(fieldData, Name.GetName("LAST_TIME")));
+    }
+
+    /// <summary>A time alone is dated with the clock's local date.</summary>
+    /// <remarks>
+    /// Mutation: the date taken from the UTC clock, which dates the stamp a day ahead.
+    /// Oracle: the Python blp test_request_time_only_takes_machine_date expected value
+    /// for the UTC id: a New York machine at 22:30 on June 16 sees June 16, and the
+    /// value 23:59:58 UTC is 19:59:58 in New York. The New York assumed-zone id has no
+    /// C# input, as the parser reads every time as UTC.
+    /// </remarks>
+    [Fact]
+    public void TimeAloneTakesTheClockLocalDate()
+    {
+        var newYork = TimeZoneInfo.FindSystemTimeZoneById("America/New_York");
+        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 6, 17, 2, 30, 0, TimeSpan.Zero));
+        clock.SetLocalTimeZone(newYork);
+        var parser = new ElementParser(
+            newYork, forceString: false, timeAsDateTime: true, timeProvider: clock);
+        var fieldData = RefDataEvents.FieldData("<LAST_TIME>23:59:58.000</LAST_TIME>");
+
+        Assert.Equal(
+            new DateTimeOffset(2026, 6, 16, 19, 59, 58, TimeSpan.FromHours(-4)),
+            parser.SubelementValue(fieldData, Name.GetName("LAST_TIME")));
     }
 
     /// <summary>

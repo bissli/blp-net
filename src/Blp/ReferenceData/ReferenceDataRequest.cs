@@ -27,4 +27,27 @@ public sealed record ReferenceDataRequest(
     /// Return a time-only value as a <see cref="DateTimeOffset"/> dated today.
     /// </summary>
     public bool TimeAsDateTime { get; init; }
+
+    /// <summary>
+    /// Throw <see cref="RequestSecurityException"/> when the response holds a security
+    /// error. Checked before <see cref="RaiseFieldError"/>.
+    /// </summary>
+    public bool RaiseSecurityError { get; init; }
+
+    /// <summary>
+    /// Throw <see cref="RequestFieldException"/> when the response holds a field error.
+    /// </summary>
+    public bool RaiseFieldError { get; init; }
+
+    /// <summary>
+    /// Longest wait for the next event. Each partial response restarts it. Null takes
+    /// <see cref="BlpClientOptions.IdleTimeout"/>.
+    /// </summary>
+    public TimeSpan? IdleTimeout { get; init; }
+
+    /// <summary>
+    /// Longest wait for the whole response, which no partial response restarts. Null
+    /// takes <see cref="BlpClientOptions.TotalTimeout"/>.
+    /// </summary>
+    public TimeSpan? TotalTimeout { get; init; }
 }

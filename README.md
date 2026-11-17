@@ -59,10 +59,16 @@ of concurrent requests.
 
 A response keys its values by the security string Bloomberg echoes. A
 rejected security or field appears in `SecurityErrors` or `FieldErrors`
-and leaves no value. A failed request raises `ResponseException`. A dead
-or missing session raises a `SessionException`. A request that waits
-longer than `BlpClientOptions.IdleTimeout` for its next event raises
-`RequestTimeoutException`.
+and leaves no value. A reference or historical request with
+`RaiseSecurityError` or `RaiseFieldError` set instead raises
+`RequestSecurityException` or `RequestFieldException` once the response
+completes, security errors first. A failed request raises
+`ResponseException`. A dead or missing session raises a
+`SessionException`. A request that waits longer than its `IdleTimeout`
+for the next event, or its `TotalTimeout` for the full response, raises
+`RequestTimeoutException`. Each limit a request leaves unset takes the
+client's: `BlpClientOptions.IdleTimeout`, or `BlpClientOptions.TotalTimeout`,
+which defaults to no limit.
 
 ## Values
 

@@ -15,8 +15,14 @@ namespace Blp.Internal;
 /// <param name="timeAsDateTime">
 /// Return a time-only value as a <see cref="DateTimeOffset"/> dated today.
 /// </param>
+/// <param name="timeProvider">
+/// Clock whose local date dates a time-only value. Null takes the system clock.
+/// </param>
 internal sealed partial class ElementParser(
-    TimeZoneInfo timeZone, bool forceString, bool timeAsDateTime)
+    TimeZoneInfo timeZone,
+    bool forceString,
+    bool timeAsDateTime,
+    TimeProvider? timeProvider = null)
 {
     // libb round_digit_string keeps the text of a number past this many digits.
     private const int MaxPlainDigits = 28;
@@ -30,6 +36,7 @@ internal sealed partial class ElementParser(
     private readonly TimeZoneInfo _timeZone = timeZone;
     private readonly bool _forceString = forceString;
     private readonly bool _timeAsDateTime = timeAsDateTime;
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
 
     /// <summary>The messages of responseEvent, in order.</summary>
     /// <param name="responseEvent">A PARTIAL_RESPONSE or RESPONSE event.</param>
@@ -318,7 +325,7 @@ internal sealed partial class ElementParser(
             return TimeZoneInfo.ConvertTime(instant, _timeZone);
         }
 
-        var today = DateOnly.FromDateTime(DateTime.Now);
+        var today = DateOnly.FromDateTime(_timeProvider.GetLocalNow().DateTime);
         var stamp = new DateTimeOffset(
             today.ToDateTime(TimeOnly.FromTimeSpan(wallClock.TimeOfDay)), TimeSpan.Zero);
         var zoned = TimeZoneInfo.ConvertTime(stamp, _timeZone);

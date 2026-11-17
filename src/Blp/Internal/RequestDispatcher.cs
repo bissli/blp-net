@@ -5,15 +5,22 @@ namespace Blp.Internal;
 
 /// <summary>
 /// Routes session events to the requests they answer, and fails a request whose next
-/// event does not arrive within the idle timeout.
+/// event or full response does not arrive within its limits.
 /// </summary>
 /// <param name="idleTimeout">
-/// Longest wait for a request's next event. Each partial response restarts it.
+/// Longest wait for a request's next event, for a request that sets none. Each partial
+/// response restarts it.
 /// </param>
-/// <param name="timeProvider">Clock for the idle timers.</param>
-internal sealed class RequestDispatcher(TimeSpan idleTimeout, TimeProvider timeProvider)
+/// <param name="totalTimeout">
+/// Longest wait for a request's full response, for a request that sets none. Null sets
+/// no limit.
+/// </param>
+/// <param name="timeProvider">Clock for the timers.</param>
+internal sealed class RequestDispatcher(
+    TimeSpan idleTimeout, TimeSpan? totalTimeout, TimeProvider timeProvider)
 {
     private readonly TimeSpan _idleTimeout = idleTimeout;
+    private readonly TimeSpan? _totalTimeout = totalTimeout;
     private readonly TimeProvider _timeProvider = timeProvider;
     private readonly ConcurrentDictionary<CorrelationID, PendingRequest> _pending = new();
 
@@ -22,21 +29,52 @@ internal sealed class RequestDispatcher(TimeSpan idleTimeout, TimeProvider timeP
     /// </summary>
     /// <param name="correlationId">The id the request is sent with.</param>
     /// <param name="handler">Processes each response event.</param>
+    /// <param name="idleTimeout">
+    /// This request's idle limit. Null takes the dispatcher's.
+    /// </param>
+    /// <param name="totalTimeout">
+    /// This request's total limit, counted from registration. Null takes the
+    /// dispatcher's.
+    /// </param>
     /// <returns>
     /// A task that completes once handler processes the RESPONSE event, and faults with
-    /// the request's failure.
+    /// the request's failure. Either limit passing faults it with a
+    /// <see cref="RequestTimeoutException"/>.
     /// </returns>
-    public Task Register(CorrelationID correlationId, IRequestHandler handler)
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// A limit is negative or longer than a timer can run. Nothing stays pending.
+    /// </exception>
+    public Task Register(
+        CorrelationID correlationId,
+        IRequestHandler handler,
+        TimeSpan? idleTimeout = null,
+        TimeSpan? totalTimeout = null)
     {
-        var idleTimer = _timeProvider.CreateTimer(
-            _ => Fail(correlationId, new RequestTimeoutException(
-                $"No data for request {correlationId} within the idle limit of {_idleTimeout}.")),
-            null,
-            Timeout.InfiniteTimeSpan,
-            Timeout.InfiniteTimeSpan);
-        var pending = new PendingRequest(handler, idleTimer);
+        var idleLimit = idleTimeout ?? _idleTimeout;
+        var totalLimit = totalTimeout ?? _totalTimeout;
+        var idleTimer = CreateTimer(
+            correlationId,
+            $"No data for request {correlationId} within the idle limit of {idleLimit}.");
+        var totalTimer = totalLimit is null
+            ? null
+            : CreateTimer(
+                correlationId,
+                $"No full response for request {correlationId} within the total limit of "
+                    + $"{totalLimit}.");
+        var pending = new PendingRequest(handler, idleLimit, idleTimer, totalTimer);
         _pending[correlationId] = pending;
-        idleTimer.Change(_idleTimeout, Timeout.InfiniteTimeSpan);
+        try
+        {
+            idleTimer.Change(idleLimit, Timeout.InfiniteTimeSpan);
+            totalTimer?.Change(totalLimit.GetValueOrDefault(), Timeout.InfiniteTimeSpan);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            _pending.TryRemove(correlationId, out _);
+            pending.StopTimers();
+            throw;
+        }
+
         return pending.Completion.Task;
     }
 
@@ -46,7 +84,7 @@ internal sealed class RequestDispatcher(TimeSpan idleTimeout, TimeProvider timeP
     public void Fail(CorrelationID correlationId, Exception error)
     {
         if (!_pending.TryRemove(correlationId, out var pending)) return;
-        pending.IdleTimer.Dispose();
+        pending.StopTimers();
         pending.Completion.TrySetException(error);
     }
 
@@ -132,22 +170,37 @@ internal sealed class RequestDispatcher(TimeSpan idleTimeout, TimeProvider timeP
 
         if (sessionEvent.Type == Event.EventType.PARTIAL_RESPONSE)
         {
-            pending.IdleTimer.Change(_idleTimeout, Timeout.InfiniteTimeSpan);
+            pending.IdleTimer.Change(pending.IdleLimit, Timeout.InfiniteTimeSpan);
             return;
         }
 
         if (_pending.TryRemove(correlationId, out _))
         {
-            pending.IdleTimer.Dispose();
+            pending.StopTimers();
             pending.Completion.TrySetResult();
         }
     }
 
-    private sealed class PendingRequest(IRequestHandler handler, ITimer idleTimer)
+    private ITimer CreateTimer(CorrelationID correlationId, string message) =>
+        _timeProvider.CreateTimer(
+            _ => Fail(correlationId, new RequestTimeoutException(message)),
+            null,
+            Timeout.InfiniteTimeSpan,
+            Timeout.InfiniteTimeSpan);
+
+    private sealed class PendingRequest(
+        IRequestHandler handler, TimeSpan idleLimit, ITimer idleTimer, ITimer? totalTimer)
     {
         public IRequestHandler Handler { get; } = handler;
+        public TimeSpan IdleLimit { get; } = idleLimit;
         public ITimer IdleTimer { get; } = idleTimer;
         public TaskCompletionSource Completion { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public void StopTimers()
+        {
+            IdleTimer.Dispose();
+            totalTimer?.Dispose();
+        }
     }
 }

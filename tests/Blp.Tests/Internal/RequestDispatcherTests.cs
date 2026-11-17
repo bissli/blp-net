@@ -11,7 +11,8 @@ public class RequestDispatcherTests
     private readonly FakeTimeProvider _clock = new();
     private readonly RequestDispatcher _dispatcher;
 
-    public RequestDispatcherTests() => _dispatcher = new RequestDispatcher(_idleTimeout, _clock);
+    public RequestDispatcherTests() =>
+        _dispatcher = new RequestDispatcher(_idleTimeout, null, _clock);
 
     /// <summary>
     /// A partial response keeps the request open, and the response completes it.
@@ -100,6 +101,87 @@ public class RequestDispatcherTests
         Assert.Equal(2, handler.EventCount);
     }
 
+    /// <summary>The total limit ends a partial stream that never goes idle.</summary>
+    /// <remarks>
+    /// Mutation: the total deadline dropped, or restarted on each partial.
+    /// Oracle: the Python blp test_total_limit_ends_steady_partial_stream expected
+    /// value. A partial every 5 s under an 8 s idle limit and a 20 s total limit: the
+    /// request is open one tick before 20 s and fails at 20 s with a total-limit
+    /// message.
+    /// </remarks>
+    [Fact]
+    public void TotalLimitEndsSteadyPartialStream()
+    {
+        var dispatcher = new RequestDispatcher(
+            TimeSpan.FromSeconds(8), TimeSpan.FromSeconds(20), _clock);
+        var id = new CorrelationID(1);
+        var task = dispatcher.Register(id, new RecordingHandler());
+
+        for (int partial = 0; partial < 3; partial++)
+        {
+            _clock.Advance(TimeSpan.FromSeconds(5));
+            dispatcher.Dispatch(Answer(Event.EventType.PARTIAL_RESPONSE, id));
+        }
+
+        _clock.Advance(TimeSpan.FromSeconds(5) - TimeSpan.FromTicks(1));
+        Assert.False(task.IsCompleted);
+        _clock.Advance(TimeSpan.FromTicks(1));
+
+        var error = Assert.IsType<RequestTimeoutException>(task.Exception?.InnerException);
+        Assert.Contains("total limit", error.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>A request's own limits replace the dispatcher's.</summary>
+    /// <remarks>
+    /// Mutation: the dispatcher's idle limit used for every request, or one request's
+    /// idle limit applied to another.
+    /// Oracle: two requests under a 30 s dispatcher idle limit. The first sets a 10 s
+    /// idle limit and fails at 10 s. The second sets none and is open at 10 s.
+    /// </remarks>
+    [Fact]
+    public void RequestLimitsReplaceTheDefaults()
+    {
+        var own = _dispatcher.Register(
+            new CorrelationID(1), new RecordingHandler(), TimeSpan.FromSeconds(10));
+        var inherited = _dispatcher.Register(new CorrelationID(2), new RecordingHandler());
+
+        _clock.Advance(TimeSpan.FromSeconds(10));
+
+        Assert.IsType<RequestTimeoutException>(own.Exception?.InnerException);
+        Assert.False(inherited.IsCompleted);
+    }
+
+    /// <summary>
+    /// A request's own total limit applies where the dispatcher has none.
+    /// </summary>
+    /// <remarks>
+    /// Mutation: the dispatcher's total limit used in place of the request's, or the
+    /// request's idle limit passed as its total limit.
+    /// Oracle: a partial every 5 s under an 8 s idle limit, no dispatcher total limit,
+    /// and a 20 s request total limit: open one tick before 20 s, failed at 20 s.
+    /// </remarks>
+    [Fact]
+    public void RequestTotalLimitEndsSteadyPartialStream()
+    {
+        var dispatcher = new RequestDispatcher(TimeSpan.FromSeconds(8), null, _clock);
+        var id = new CorrelationID(1);
+        var task = dispatcher.Register(
+            id, new RecordingHandler(), TimeSpan.FromSeconds(8), TimeSpan.FromSeconds(20));
+
+        for (int partial = 0; partial < 3; partial++)
+        {
+            _clock.Advance(TimeSpan.FromSeconds(5));
+            dispatcher.Dispatch(Answer(Event.EventType.PARTIAL_RESPONSE, id));
+        }
+
+        _clock.Advance(TimeSpan.FromSeconds(5) - TimeSpan.FromTicks(1));
+        Assert.False(task.IsCompleted);
+        _clock.Advance(TimeSpan.FromTicks(1));
+
+        var error = Assert.IsType<RequestTimeoutException>(task.Exception?.InnerException);
+        Assert.Contains("total limit", error.Message, StringComparison.Ordinal);
+    }
+
     /// <summary>A steady partial stream finishes, as no total limit ends it.</summary>
     /// <remarks>
     /// Mutation: a partial that does not restart the idle timeout, or a default total
@@ -111,7 +193,7 @@ public class RequestDispatcherTests
     [Fact]
     public void SteadyPartialStreamFinishesUnderIdleLimit()
     {
-        var dispatcher = new RequestDispatcher(TimeSpan.FromSeconds(8), _clock);
+        var dispatcher = new RequestDispatcher(TimeSpan.FromSeconds(8), null, _clock);
         var id = new CorrelationID(1);
         var handler = new RecordingHandler();
         var task = dispatcher.Register(id, handler);

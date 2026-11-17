@@ -17,11 +17,11 @@ public sealed class BlpClient : IDisposable
     private static readonly ReferenceDataRequest _connectivityProbe =
         new(["IBM US Equity"], ["ID_BB_GLOBAL"]);
 
-    private readonly Session _session;
+    private readonly IBlpSession _session;
     private readonly RequestDispatcher _dispatcher;
     private readonly Service _refDataService;
 
-    private BlpClient(Session session, RequestDispatcher dispatcher, Service refDataService)
+    private BlpClient(IBlpSession session, RequestDispatcher dispatcher, Service refDataService)
     {
         _session = session;
         _dispatcher = dispatcher;
@@ -44,10 +44,29 @@ public sealed class BlpClient : IDisposable
     /// <exception cref="SessionException">
     /// The SDK threw while starting, or the connectivity check failed.
     /// </exception>
-    public static async Task<BlpClient> ConnectAsync(
-        BlpClientOptions options, CancellationToken cancellationToken = default)
+    public static Task<BlpClient> ConnectAsync(
+        BlpClientOptions options, CancellationToken cancellationToken = default) =>
+        ConnectAsync(
+            options,
+            (sessionOptions, handler) => new SdkSession(new Session(sessionOptions, handler)),
+            cancellationToken);
+
+    /// <summary>
+    /// Starts a session from sessionFactory, then checks it as the public overload.
+    /// </summary>
+    /// <param name="options">Session settings.</param>
+    /// <param name="sessionFactory">
+    /// Creates the session from its options and event handler.
+    /// </param>
+    /// <param name="cancellationToken">Cancels the connectivity check.</param>
+    /// <returns>The connected client.</returns>
+    internal static async Task<BlpClient> ConnectAsync(
+        BlpClientOptions options,
+        Func<SessionOptions, Bloomberglp.Blpapi.EventHandler, IBlpSession> sessionFactory,
+        CancellationToken cancellationToken)
     {
-        var dispatcher = new RequestDispatcher(options.IdleTimeout, TimeProvider.System);
+        var dispatcher = new RequestDispatcher(
+            options.IdleTimeout, options.TotalTimeout, TimeProvider.System);
         var sessionOptions = new SessionOptions
         {
             ServerHost = "localhost",
@@ -57,9 +76,8 @@ public sealed class BlpClient : IDisposable
         };
         if (options.ApplicationIdentityKey is { } key) sessionOptions.ApplicationIdentityKey = key;
 
-        var session = new Session(
-            sessionOptions,
-            (sessionEvent, _) => dispatcher.Dispatch(sessionEvent));
+        var session = sessionFactory(
+            sessionOptions, (sessionEvent, _) => dispatcher.Dispatch(sessionEvent));
         try
         {
             if (!session.Start())
@@ -109,18 +127,27 @@ public sealed class BlpClient : IDisposable
     /// response.
     /// </param>
     /// <returns>The response.</returns>
-    /// <exception cref="RequestTimeoutException">The idle timeout passed.</exception>
+    /// <exception cref="RequestTimeoutException">
+    /// The idle or total timeout passed.
+    /// </exception>
     /// <exception cref="SessionNotAvailableException">
     /// The session is not started, or Bloomberg reported a dead connection or a missing
     /// service.
     /// </exception>
     /// <exception cref="SessionTerminatedException">The session terminated.</exception>
     /// <exception cref="ResponseException">Bloomberg failed the request.</exception>
+    /// <exception cref="RequestSecurityException">
+    /// RaiseSecurityError is set and the response holds a security error.
+    /// </exception>
+    /// <exception cref="RequestFieldException">
+    /// RaiseFieldError is set and the response holds a field error.
+    /// </exception>
     public async Task<ReferenceDataResponse> GetReferenceDataAsync(
         ReferenceDataRequest request, CancellationToken cancellationToken = default)
     {
         var handler = new ReferenceDataHandler(request);
-        await SendAsync(handler, cancellationToken).ConfigureAwait(false);
+        await SendAsync(handler, request.IdleTimeout, request.TotalTimeout, cancellationToken)
+            .ConfigureAwait(false);
         return handler.ToResponse();
     }
 
@@ -133,18 +160,27 @@ public sealed class BlpClient : IDisposable
     /// response.
     /// </param>
     /// <returns>The response.</returns>
-    /// <exception cref="RequestTimeoutException">The idle timeout passed.</exception>
+    /// <exception cref="RequestTimeoutException">
+    /// The idle or total timeout passed.
+    /// </exception>
     /// <exception cref="SessionNotAvailableException">
     /// The session is not started, or Bloomberg reported a dead connection or a missing
     /// service.
     /// </exception>
     /// <exception cref="SessionTerminatedException">The session terminated.</exception>
     /// <exception cref="ResponseException">Bloomberg failed the request.</exception>
+    /// <exception cref="RequestSecurityException">
+    /// RaiseSecurityError is set and the response holds a security error.
+    /// </exception>
+    /// <exception cref="RequestFieldException">
+    /// RaiseFieldError is set and the response holds a field error.
+    /// </exception>
     public async Task<HistoricalDataResponse> GetHistoricalDataAsync(
         HistoricalDataRequest request, CancellationToken cancellationToken = default)
     {
         var handler = new HistoricalDataHandler(request);
-        await SendAsync(handler, cancellationToken).ConfigureAwait(false);
+        await SendAsync(handler, request.IdleTimeout, request.TotalTimeout, cancellationToken)
+            .ConfigureAwait(false);
         return handler.ToResponse();
     }
 
@@ -159,7 +195,9 @@ public sealed class BlpClient : IDisposable
     /// <returns>
     /// One name-to-value row per tick, in time order. A name one tick lacks holds null.
     /// </returns>
-    /// <exception cref="RequestTimeoutException">The idle timeout passed.</exception>
+    /// <exception cref="RequestTimeoutException">
+    /// The idle or total timeout passed.
+    /// </exception>
     /// <exception cref="SessionNotAvailableException">
     /// The session is not started, or Bloomberg reported a dead connection or a missing
     /// service.
@@ -170,7 +208,8 @@ public sealed class BlpClient : IDisposable
         IntradayTickRequest request, CancellationToken cancellationToken = default)
     {
         var handler = new IntradayTickHandler(request);
-        await SendAsync(handler, cancellationToken).ConfigureAwait(false);
+        await SendAsync(handler, request.IdleTimeout, request.TotalTimeout, cancellationToken)
+            .ConfigureAwait(false);
         return handler.ToResponse();
     }
 
@@ -183,7 +222,9 @@ public sealed class BlpClient : IDisposable
     /// response.
     /// </param>
     /// <returns>One name-to-value row per bar, in time order.</returns>
-    /// <exception cref="RequestTimeoutException">The idle timeout passed.</exception>
+    /// <exception cref="RequestTimeoutException">
+    /// The idle or total timeout passed.
+    /// </exception>
     /// <exception cref="SessionNotAvailableException">
     /// The session is not started, or Bloomberg reported a dead connection or a missing
     /// service.
@@ -194,7 +235,8 @@ public sealed class BlpClient : IDisposable
         IntradayBarRequest request, CancellationToken cancellationToken = default)
     {
         var handler = new IntradayBarHandler(request);
-        await SendAsync(handler, cancellationToken).ConfigureAwait(false);
+        await SendAsync(handler, request.IdleTimeout, request.TotalTimeout, cancellationToken)
+            .ConfigureAwait(false);
         return handler.ToResponse();
     }
 
@@ -208,12 +250,16 @@ public sealed class BlpClient : IDisposable
         _session.Dispose();
     }
 
-    private async Task SendAsync(IRequestHandler handler, CancellationToken cancellationToken)
+    private async Task SendAsync(
+        IRequestHandler handler,
+        TimeSpan? idleTimeout,
+        TimeSpan? totalTimeout,
+        CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var bloombergRequest = handler.CreateRequest(_refDataService);
         var correlationId = new CorrelationID();
-        var response = _dispatcher.Register(correlationId, handler);
+        var response = _dispatcher.Register(correlationId, handler, idleTimeout, totalTimeout);
         try
         {
             _session.SendRequest(bloombergRequest, correlationId);

@@ -8,10 +8,15 @@ namespace Blp.HistoricalData;
 /// Sends one <see cref="HistoricalDataRequest"/> and collects its response.
 /// </summary>
 /// <param name="request">The request to send.</param>
-internal sealed class HistoricalDataHandler(HistoricalDataRequest request) : IRequestHandler
+/// <param name="timeProvider">
+/// Clock for the local date of a null End. Null takes the system clock.
+/// </param>
+internal sealed class HistoricalDataHandler(
+    HistoricalDataRequest request, TimeProvider? timeProvider = null) : IRequestHandler
 {
     private readonly HistoricalDataRequest _request = request;
-    private readonly ElementParser _parser = new(request.TimeZone, false, false);
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
+    private readonly ElementParser _parser = new(request.TimeZone, false, false, timeProvider);
     private readonly Dictionary<string, IReadOnlyList<HistoricalDataRow>> _rowsBySecurity = [];
     private readonly List<SecurityError> _securityErrors = [];
     private readonly List<FieldError> _fieldErrors = [];
@@ -30,8 +35,10 @@ internal sealed class HistoricalDataHandler(HistoricalDataRequest request) : IRe
             bloombergRequest.Append(ElementNames.Fields, field);
         }
 
-        bloombergRequest.Set(ElementNames.StartDate, BloombergDate(_request.Start));
-        bloombergRequest.Set(ElementNames.EndDate, BloombergDate(_request.End));
+        var end = _request.End ?? DateOnly.FromDateTime(_timeProvider.GetLocalNow().DateTime);
+        var start = _request.Start ?? end.AddDays(-1);
+        bloombergRequest.Set(ElementNames.StartDate, BloombergDate(start));
+        bloombergRequest.Set(ElementNames.EndDate, BloombergDate(end));
         bloombergRequest.Set(
             ElementNames.PeriodicitySelection, ElementNames.BloombergName(_request.Period));
         if (_request.PeriodAdjustment is { } adjustment)
@@ -76,6 +83,16 @@ internal sealed class HistoricalDataHandler(HistoricalDataRequest request) : IRe
             bloombergRequest.Set(ElementNames.MaxDataPoints, maxDataPoints);
         }
 
+        SetFlag(bloombergRequest, ElementNames.AdjustmentNormal, _request.AdjustmentNormal);
+        SetFlag(bloombergRequest, ElementNames.AdjustmentAbnormal, _request.AdjustmentAbnormal);
+        SetFlag(bloombergRequest, ElementNames.AdjustmentSplit, _request.AdjustmentSplit);
+        SetFlag(
+            bloombergRequest, ElementNames.AdjustmentFollowDpdf, _request.AdjustmentFollowDpdf);
+        if (_request.CalendarCodeOverride is { } calendarCode)
+        {
+            bloombergRequest.Set(ElementNames.CalendarCodeOverride, calendarCode);
+        }
+
         FieldOverrides.AppendTo(bloombergRequest, _request.Overrides);
         return bloombergRequest;
     }
@@ -114,8 +131,23 @@ internal sealed class HistoricalDataHandler(HistoricalDataRequest request) : IRe
 
     /// <summary>The response built from every event processed so far.</summary>
     /// <returns>The response.</returns>
-    public HistoricalDataResponse ToResponse() =>
-        new(_rowsBySecurity, _securityErrors, _fieldErrors);
+    /// <exception cref="RequestSecurityException">
+    /// The request raises security errors and one was received.
+    /// </exception>
+    /// <exception cref="RequestFieldException">
+    /// The request raises field errors and one was received.
+    /// </exception>
+    public HistoricalDataResponse ToResponse()
+    {
+        ErrorRaising.ThrowRequested(
+            _request.RaiseSecurityError, _request.RaiseFieldError, _securityErrors, _fieldErrors);
+        return new(_rowsBySecurity, _securityErrors, _fieldErrors);
+    }
+
+    private static void SetFlag(Request request, Name name, bool? value)
+    {
+        if (value is { } flag) request.Set(name, flag);
+    }
 
     private static string BloombergDate(DateOnly date) =>
         date.ToString("yyyyMMdd", CultureInfo.InvariantCulture);

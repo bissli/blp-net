@@ -1,5 +1,6 @@
 using Bloomberglp.Blpapi;
 using Blp.HistoricalData;
+using Microsoft.Extensions.Time.Testing;
 
 namespace Blp.Tests.HistoricalData;
 
@@ -13,6 +14,32 @@ public class HistoricalDataHandlerTests
     {
         TimeZone = TimeZoneInfo.Utc,
     };
+
+    private const string FieldErrorXml = """
+        <securityData>
+          <security>IBM US Equity</security>
+          <fieldExceptions>
+            <fieldId>BAD_FIELD</fieldId>
+            <errorInfo>
+              <category>BAD_FLD</category>
+              <message>Field not valid</message>
+              <subcategory>INVALID_FIELD</subcategory>
+            </errorInfo>
+          </fieldExceptions>
+          <fieldData><date>2024-01-02</date><PX_LAST>161.5</PX_LAST></fieldData>
+        </securityData>
+        """;
+
+    private const string SecurityErrorXml = """
+        <securityData>
+          <security>BAD US Equity</security>
+          <securityError>
+            <category>BAD_SEC</category>
+            <message>Unknown</message>
+            <subcategory>INVALID_SECURITY</subcategory>
+          </securityError>
+        </securityData>
+        """;
 
     /// <summary>
     /// CreateRequest sends every option under its Bloomberg enumeration name.
@@ -181,6 +208,211 @@ public class HistoricalDataHandlerTests
         Assert.Equal("20240102", Text(sent, "startDate"));
         Assert.Equal("20240102", Text(sent, "endDate"));
     }
+
+    /// <summary>A missing start is the day before the end's own date.</summary>
+    /// <remarks>
+    /// Mutation: the start taken from the host's date, or left equal to the end.
+    /// Oracle: the Python blp test_historical_missing_start_is_day_before_end expected
+    /// value for the end date January 2, 2024. The string end with an offset has no C#
+    /// form, since a caller passes a DateOnly.
+    /// </remarks>
+    [Fact]
+    public void MissingStartIsTheDayBeforeEnd()
+    {
+        var request = new HistoricalDataRequest(
+            ["IBM US Equity"], ["PX_LAST"], End: new DateOnly(2024, 1, 2));
+
+        var sent = new HistoricalDataHandler(request, new FakeTimeProvider())
+            .CreateRequest(RefDataEvents.Service);
+
+        Assert.Equal("20240101", Text(sent, "startDate"));
+        Assert.Equal("20240102", Text(sent, "endDate"));
+    }
+
+    /// <summary>A missing end is the host's local date.</summary>
+    /// <remarks>
+    /// Mutation: the end taken from the UTC date, which sends 20240102 and a start of
+    /// 20240101 on a host east of UTC between local midnight and 00:00 UTC.
+    /// Oracle: the Python blp test_historical_missing_end_is_host_date expected value.
+    /// A Tokyo host at 08:00 on January 3 is 23:00 UTC on January 2.
+    /// </remarks>
+    [Fact]
+    public void MissingEndIsTheHostLocalDate()
+    {
+        var clock = new FakeTimeProvider(new DateTimeOffset(2024, 1, 2, 23, 0, 0, TimeSpan.Zero));
+        clock.SetLocalTimeZone(TimeZoneInfo.CreateCustomTimeZone(
+            "Test+9", TimeSpan.FromHours(9), "Test+9", "Test+9"));
+        var request = new HistoricalDataRequest(["IBM US Equity"], ["PX_LAST"]);
+
+        var sent = new HistoricalDataHandler(request, clock).CreateRequest(RefDataEvents.Service);
+
+        Assert.Equal("20240102", Text(sent, "startDate"));
+        Assert.Equal("20240103", Text(sent, "endDate"));
+    }
+
+    /// <summary>
+    /// Each adjustment flag goes under its own element, and a flag set to false is sent
+    /// as false.
+    /// </summary>
+    /// <remarks>
+    /// Mutation: a false flag treated as unset, a flag sent under another element's
+    /// name, or the calendar code left out.
+    /// Oracle: the Python blp set_flag, which sends every flag that is not None, and
+    /// the HistoricalDataRequest element names. Each row sets one flag true and the
+    /// other three false, so a swap of any two flags moves the true value.
+    /// </remarks>
+    [Theory]
+    [InlineData("adjustmentNormal")]
+    [InlineData("adjustmentAbnormal")]
+    [InlineData("adjustmentSplit")]
+    [InlineData("adjustmentFollowDPDF")]
+    public void CreateRequestSendsEachAdjustmentFlagUnderItsName(string trueFlag)
+    {
+        var request = _request with
+        {
+            AdjustmentNormal = trueFlag == "adjustmentNormal",
+            AdjustmentAbnormal = trueFlag == "adjustmentAbnormal",
+            AdjustmentSplit = trueFlag == "adjustmentSplit",
+            AdjustmentFollowDpdf = trueFlag == "adjustmentFollowDPDF",
+            CalendarCodeOverride = "UK",
+        };
+
+        var sent = new HistoricalDataHandler(request).CreateRequest(RefDataEvents.Service);
+
+        foreach (string name in (string[])[
+            "adjustmentNormal", "adjustmentAbnormal", "adjustmentSplit", "adjustmentFollowDPDF",
+        ])
+        {
+            Assert.Equal(name == trueFlag, Flag(sent, name));
+        }
+
+        Assert.Equal("UK", Text(sent, "calendarCodeOverride"));
+    }
+
+    /// <summary>An adjustment option left null is not sent.</summary>
+    /// <remarks>
+    /// Mutation: a null flag sent as false, or an empty calendar code sent.
+    /// Oracle: the Python blp set_flag, which skips a flag that is None.
+    /// </remarks>
+    [Fact]
+    public void CreateRequestOmitsNullAdjustmentOptions()
+    {
+        var sent = new HistoricalDataHandler(_request).CreateRequest(RefDataEvents.Service);
+
+        foreach (string name in (string[])[
+            "adjustmentNormal", "adjustmentAbnormal", "adjustmentSplit", "adjustmentFollowDPDF",
+            "calendarCodeOverride",
+        ])
+        {
+            Assert.False(sent.HasElement(Name.GetName(name)), name);
+        }
+    }
+
+    /// <summary>A field error raises RequestFieldException when asked.</summary>
+    /// <remarks>
+    /// Mutation: the field errors of a historical securityData element dropped, so a
+    /// bad field passes in silence, or the raise skipped.
+    /// Oracle: the Python blp test_historical_field_error_raises expected exception for
+    /// one BAD_FLD entry for the field BAD_FIELD.
+    /// </remarks>
+    [Fact]
+    public void FieldErrorRaisesWhenRequested()
+    {
+        var handler = new HistoricalDataHandler(
+            _request with { Fields = ["PX_LAST", "BAD_FIELD"], RaiseFieldError = true });
+        handler.ProcessResponse(HistoricalResponse(Event.EventType.RESPONSE, FieldErrorXml));
+
+        var error = Assert.Throws<RequestFieldException>(handler.ToResponse);
+        Assert.Equal("BAD_FIELD", Assert.Single(error.Errors).Field);
+    }
+
+    /// <summary>A security error raises its own exception type.</summary>
+    /// <remarks>
+    /// Mutation: a bare Exception thrown, or the exception placed under
+    /// SessionException, which a caller would read as a lost session.
+    /// Oracle: the Python blp test_request_errors_are_typed expected class for the
+    /// security_errors id, one hand-built BAD_SEC record.
+    /// </remarks>
+    [Fact]
+    public void SecurityErrorRaisesATypedException()
+    {
+        var handler = new HistoricalDataHandler(_request with { RaiseSecurityError = true });
+        handler.ProcessResponse(HistoricalResponse(Event.EventType.RESPONSE, SecurityErrorXml));
+
+        var error = Assert.Throws<RequestSecurityException>(handler.ToResponse);
+        Assert.Equal(
+            new SecurityError("BAD US Equity", "BAD_SEC", "Unknown", "INVALID_SECURITY"),
+            Assert.Single(error.Errors));
+        Assert.IsNotType<SessionException>(error, exactMatch: false);
+    }
+
+    /// <summary>A field error raises a RequestFieldException of its own.</summary>
+    /// <remarks>
+    /// Mutation: a bare Exception thrown, the two exception classes swapped, or the
+    /// exception placed under SessionException.
+    /// Oracle: the Python blp test_request_errors_are_typed expected class for the
+    /// field_errors id, one hand-built BAD_FLD record.
+    /// </remarks>
+    [Fact]
+    public void FieldErrorRaisesATypedException()
+    {
+        var handler = new HistoricalDataHandler(
+            _request with { Fields = ["PX_LAST", "BAD_FIELD"], RaiseFieldError = true });
+        handler.ProcessResponse(HistoricalResponse(Event.EventType.RESPONSE, FieldErrorXml));
+
+        var error = Assert.Throws<RequestFieldException>(handler.ToResponse);
+        Assert.Equal(
+            new FieldError(
+                "IBM US Equity", "BAD_FIELD", "BAD_FLD", "Field not valid", "INVALID_FIELD"),
+            Assert.Single(error.Errors));
+        Assert.IsNotType<SessionException>(error, exactMatch: false);
+    }
+
+    /// <summary>A security error is raised before a field error.</summary>
+    /// <remarks>
+    /// Mutation: the field check placed before the security check.
+    /// Oracle: the Python blp BaseRequest.raise_exception, which checks security errors
+    /// first. Both kinds arrive and both flags are set.
+    /// </remarks>
+    [Fact]
+    public void SecurityErrorIsRaisedBeforeFieldError()
+    {
+        var handler = new HistoricalDataHandler(
+            _request with
+            {
+                Fields = ["PX_LAST", "BAD_FIELD"],
+                RaiseSecurityError = true,
+                RaiseFieldError = true,
+            });
+        handler.ProcessResponse(
+            HistoricalResponse(Event.EventType.PARTIAL_RESPONSE, FieldErrorXml));
+        handler.ProcessResponse(HistoricalResponse(Event.EventType.RESPONSE, SecurityErrorXml));
+
+        Assert.Throws<RequestSecurityException>(handler.ToResponse);
+    }
+
+    /// <summary>A response with errors passes while the request raises none.</summary>
+    /// <remarks>
+    /// Mutation: the raise flags ignored, so every error throws.
+    /// Oracle: the Python blp test_historical_field_error_recorded, which records
+    /// errors without raising under the default flags.
+    /// </remarks>
+    [Fact]
+    public void ErrorsDoNotRaiseByDefault()
+    {
+        var handler = new HistoricalDataHandler(_request);
+        handler.ProcessResponse(
+            HistoricalResponse(Event.EventType.PARTIAL_RESPONSE, FieldErrorXml));
+        handler.ProcessResponse(HistoricalResponse(Event.EventType.RESPONSE, SecurityErrorXml));
+
+        var response = handler.ToResponse();
+
+        Assert.Single(response.SecurityErrors);
+        Assert.Single(response.FieldErrors);
+    }
+
+    private static bool Flag(Request request, string name) =>
+        request.GetElement(Name.GetName(name)).GetValueAsBool();
 
     private static string Text(Request request, string name) =>
         request.GetElement(Name.GetName(name)).GetValueAsString();

@@ -69,9 +69,20 @@ internal sealed class ReferenceDataHandler(ReferenceDataRequest request) : IRequ
 
     /// <summary>The response built from every event processed so far.</summary>
     /// <returns>The response.</returns>
-    public ReferenceDataResponse ToResponse() => new(
-        _valuesBySecurity.ToDictionary(
-            pair => pair.Key, IReadOnlyDictionary<string, object?> (pair) => pair.Value),
-        _securityErrors,
-        _fieldErrors);
+    /// <exception cref="RequestSecurityException">
+    /// The request raises security errors and one was received.
+    /// </exception>
+    /// <exception cref="RequestFieldException">
+    /// The request raises field errors and one was received.
+    /// </exception>
+    public ReferenceDataResponse ToResponse()
+    {
+        ErrorRaising.ThrowRequested(
+            _request.RaiseSecurityError, _request.RaiseFieldError, _securityErrors, _fieldErrors);
+        return new(
+            _valuesBySecurity.ToDictionary(
+                pair => pair.Key, IReadOnlyDictionary<string, object?> (pair) => pair.Value),
+            _securityErrors,
+            _fieldErrors);
+    }
 }

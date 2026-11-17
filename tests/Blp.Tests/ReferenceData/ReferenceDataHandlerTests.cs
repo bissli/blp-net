@@ -203,6 +203,45 @@ public class ReferenceDataHandlerTests
         Assert.IsType<DateTimeOffset>(values["LAST_TIME"]);
     }
 
+    /// <summary>
+    /// Only the error kind the request asks for raises, whatever else the response
+    /// holds.
+    /// </summary>
+    /// <remarks>
+    /// Mutation: RaiseFieldError wired to the security flag, or a security error raised
+    /// with its flag off.
+    /// Oracle: the Python blp BaseRequest.raise_exception, which raises a kind only
+    /// when its flag is set. The response holds both kinds and only the field flag is
+    /// set.
+    /// </remarks>
+    [Fact]
+    public void OnlyTheRequestedErrorKindRaises()
+    {
+        var handler = new ReferenceDataHandler(_request with { RaiseFieldError = true });
+        handler.ProcessResponse(RefDataEvents.Response(
+            "ReferenceDataRequest",
+            Event.EventType.RESPONSE,
+            """
+            <Response>
+              <securityData>
+                <security>IBM US Equity</security>
+                <fieldExceptions>
+                  <fieldId>NAME</fieldId>
+                  <errorInfo><category>BAD_FLD</category></errorInfo>
+                </fieldExceptions>
+                <fieldData><PX_LAST>7283.5</PX_LAST></fieldData>
+              </securityData>
+              <securityData>
+                <security>BAD US Equity</security>
+                <securityError><category>BAD_SEC</category></securityError>
+              </securityData>
+            </Response>
+            """));
+
+        var error = Assert.Throws<RequestFieldException>(handler.ToResponse);
+        Assert.Equal("NAME", Assert.Single(error.Errors).Field);
+    }
+
     private static Event OneSecurity(Event.EventType eventType, string price) =>
         RefDataEvents.Response(
             "ReferenceDataRequest",

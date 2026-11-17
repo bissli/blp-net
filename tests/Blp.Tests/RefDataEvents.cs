@@ -51,6 +51,11 @@ internal static class RefDataEvents
               <element name="nonTradingDayFillOption" type="String" minOccurs="0" maxOccurs="1"/>
               <element name="nonTradingDayFillMethod" type="String" minOccurs="0" maxOccurs="1"/>
               <element name="maxDataPoints" type="Int32" minOccurs="0" maxOccurs="1"/>
+              <element name="adjustmentNormal" type="Boolean" minOccurs="0" maxOccurs="1"/>
+              <element name="adjustmentAbnormal" type="Boolean" minOccurs="0" maxOccurs="1"/>
+              <element name="adjustmentSplit" type="Boolean" minOccurs="0" maxOccurs="1"/>
+              <element name="adjustmentFollowDPDF" type="Boolean" minOccurs="0" maxOccurs="1"/>
+              <element name="calendarCodeOverride" type="String" minOccurs="0" maxOccurs="1"/>
               <element name="overrides" type="FieldOverride" minOccurs="0" maxOccurs="unbounded"/>
             </sequenceType>
             <sequenceType name="FieldOverride">

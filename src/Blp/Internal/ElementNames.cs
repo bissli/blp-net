@@ -6,8 +6,13 @@ namespace Blp.Internal;
 /// <summary>Bloomberg element and message names.</summary>
 internal static class ElementNames
 {
+    public static readonly Name AdjustmentAbnormal = Name.GetName("adjustmentAbnormal");
+    public static readonly Name AdjustmentFollowDpdf = Name.GetName("adjustmentFollowDPDF");
+    public static readonly Name AdjustmentNormal = Name.GetName("adjustmentNormal");
+    public static readonly Name AdjustmentSplit = Name.GetName("adjustmentSplit");
     public static readonly Name BarData = Name.GetName("barData");
     public static readonly Name BarTickData = Name.GetName("barTickData");
+    public static readonly Name CalendarCodeOverride = Name.GetName("calendarCodeOverride");
     public static readonly Name Category = Name.GetName("category");
     public static readonly Name Currency = Name.GetName("currency");
     public static readonly Name Date = Name.GetName("date");
