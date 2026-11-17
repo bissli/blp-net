@@ -16,16 +16,32 @@ namespace Blp.Internal;
 /// Return a time-only value as a <see cref="DateTimeOffset"/> dated today.
 /// </param>
 /// <param name="timeProvider">
-/// Clock whose local date dates a time-only value. Null takes the system clock.
+/// Clock that dates a time-only value. Null takes the system clock.
+/// </param>
+/// <param name="assumedTimeZone">
+/// Zone of the wall clock Bloomberg sends. Null takes UTC. A wall clock that a
+/// daylight-saving change skips or repeats takes the larger offset in a date-time, the
+/// offset before the change in a time dated today, and the smaller offset in a time
+/// moved back a day.
+/// </param>
+/// <param name="datesTimeAtLatestPast">
+/// Date a time-only value at its latest instant up to one hour past the clock, as a
+/// subscription's last-update stamp needs. False dates it with the clock's local
+/// date.
 /// </param>
 internal sealed partial class ElementParser(
     TimeZoneInfo timeZone,
     bool forceString,
     bool timeAsDateTime,
-    TimeProvider? timeProvider = null)
+    TimeProvider? timeProvider = null,
+    TimeZoneInfo? assumedTimeZone = null,
+    bool datesTimeAtLatestPast = false)
 {
     // libb round_digit_string keeps the text of a number past this many digits.
     private const int MaxPlainDigits = 28;
+
+    // A last-update stamp this far ahead of the host clock is taken as clock skew.
+    private static readonly TimeSpan _clockSkewAllowance = TimeSpan.FromHours(1);
 
     // A value counts as a time when any one of these parts is set.
     // Datetime.TIME needs hours, minutes and seconds all set.
@@ -37,6 +53,8 @@ internal sealed partial class ElementParser(
     private readonly bool _forceString = forceString;
     private readonly bool _timeAsDateTime = timeAsDateTime;
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
+    private readonly TimeZoneInfo _assumedTimeZone = assumedTimeZone ?? TimeZoneInfo.Utc;
+    private readonly bool _datesTimeAtLatestPast = datesTimeAtLatestPast;
 
     /// <summary>The messages of responseEvent, in order.</summary>
     /// <param name="responseEvent">A PARTIAL_RESPONSE or RESPONSE event.</param>
@@ -307,12 +325,14 @@ internal sealed partial class ElementParser(
     private List<IReadOnlyDictionary<string, object?>> SequenceAsRows(Element sequence) =>
         WithEveryName([.. Rows(sequence).Select(RowValues)]);
 
-    /// <summary>A DATETIME or TIME value, read as UTC, in timeZone.</summary>
+    /// <summary>
+    /// A DATETIME or TIME value, read in assumedTimeZone, in timeZone.
+    /// </summary>
     /// <param name="value">The value. Any zone offset it carries is ignored.</param>
     /// <returns>
     /// <see cref="DateOnly"/> without a time, <see cref="DateTimeOffset"/> with a date
-    /// and a time. A time alone is dated with this host's date, then gives a
-    /// <see cref="TimeOnly"/>, or a <see cref="DateTimeOffset"/> with timeAsDateTime.
+    /// and a time. A time alone is dated by the datesTimeAtLatestPast rule, then gives
+    /// a <see cref="TimeOnly"/>, or a <see cref="DateTimeOffset"/> with timeAsDateTime.
     /// </returns>
     private object DateTimeValue(Datetime value)
     {
@@ -322,14 +342,70 @@ internal sealed partial class ElementParser(
         if ((value.Parts & TimeParts) == 0) return DateOnly.FromDateTime(wallClock);
         if (value.HasParts(Datetime.DATE))
         {
-            var instant = new DateTimeOffset(wallClock, TimeSpan.Zero);
+            var instant = ToInstant(wallClock, _assumedTimeZone, ChangeOffset.Larger);
             return TimeZoneInfo.ConvertTime(instant, _timeZone);
         }
 
-        var today = DateOnly.FromDateTime(_timeProvider.GetLocalNow().DateTime);
-        var stamp = new DateTimeOffset(
-            today.ToDateTime(TimeOnly.FromTimeSpan(wallClock.TimeOfDay)), TimeSpan.Zero);
+        var timeOfDay = TimeOnly.FromTimeSpan(wallClock.TimeOfDay);
+        var stamp = _datesTimeAtLatestPast
+            ? LatestPastInstant(timeOfDay)
+            : ToInstant(
+                DateOnly.FromDateTime(_timeProvider.GetLocalNow().DateTime).ToDateTime(timeOfDay),
+                _assumedTimeZone,
+                ChangeOffset.BeforeChange);
         var zoned = TimeZoneInfo.ConvertTime(stamp, _timeZone);
         return _timeAsDateTime ? zoned : TimeOnly.FromDateTime(zoned.DateTime);
+    }
+
+    private DateTimeOffset LatestPastInstant(TimeOnly timeOfDay)
+    {
+        var latest = TimeZoneInfo.ConvertTime(
+            _timeProvider.GetUtcNow() + _clockSkewAllowance, _assumedTimeZone);
+        var latestDate = DateOnly.FromDateTime(latest.DateTime);
+        var stamp = ToInstant(
+            latestDate.ToDateTime(timeOfDay), _assumedTimeZone, ChangeOffset.BeforeChange);
+        return stamp > latest
+            ? ToInstant(
+                latestDate.AddDays(-1).ToDateTime(timeOfDay),
+                _assumedTimeZone,
+                ChangeOffset.Smaller)
+            : stamp;
+    }
+
+    /// <summary>wallClock in zone as an instant.</summary>
+    /// <param name="wallClock">A wall clock in zone.</param>
+    /// <param name="zone">The zone.</param>
+    /// <param name="changeOffset">
+    /// The offset for a wall clock that a daylight-saving change skips or repeats.
+    /// </param>
+    /// <returns>The instant.</returns>
+    private static DateTimeOffset ToInstant(
+        DateTime wallClock, TimeZoneInfo zone, ChangeOffset changeOffset)
+    {
+        var before = zone.GetUtcOffset(wallClock.AddDays(-1));
+        var after = zone.GetUtcOffset(wallClock.AddDays(1));
+        // IsInvalidTime and IsAmbiguousTime miss the last change before a zone's rule
+        // ends, so the gap or overlap is found from the instants each offset gives.
+        bool beforeFits = zone.GetUtcOffset(new DateTimeOffset(wallClock, before)) == before;
+        bool afterFits = zone.GetUtcOffset(new DateTimeOffset(wallClock, after)) == after;
+        if (before == after || beforeFits != afterFits)
+        {
+            return new DateTimeOffset(wallClock, beforeFits ? before : after);
+        }
+
+        var offset = changeOffset switch
+        {
+            ChangeOffset.Larger => before > after ? before : after,
+            ChangeOffset.Smaller => before < after ? before : after,
+            _ => before,
+        };
+        return new DateTimeOffset(wallClock, offset);
+    }
+
+    private enum ChangeOffset
+    {
+        Larger,
+        Smaller,
+        BeforeChange,
     }
 }

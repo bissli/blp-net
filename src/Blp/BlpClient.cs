@@ -67,17 +67,9 @@ public sealed class BlpClient : IDisposable
     {
         var dispatcher = new RequestDispatcher(
             options.IdleTimeout, options.TotalTimeout, TimeProvider.System);
-        var sessionOptions = new SessionOptions
-        {
-            ServerHost = "localhost",
-            ServerPort = 8194,
-            AuthenticationOptions = "AuthenticationType=OS_LOGON",
-            MaxEventQueueSize = 10000,
-        };
-        if (options.ApplicationIdentityKey is { } key) sessionOptions.ApplicationIdentityKey = key;
-
         var session = sessionFactory(
-            sessionOptions, (sessionEvent, _) => dispatcher.Dispatch(sessionEvent));
+            SdkSession.CreateOptions(options.ApplicationIdentityKey),
+            (sessionEvent, _) => dispatcher.Dispatch(sessionEvent));
         try
         {
             if (!session.Start())

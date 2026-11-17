@@ -179,10 +179,26 @@ internal static class RefDataEvents
         </ServiceDefinition>
         """;
 
-    private static readonly Service _service = TestUtil.DeserializeService(Schema);
+    private static readonly Lock _deserializeLock = new();
+
+    private static readonly Service _service = DeserializeService(Schema);
 
     /// <summary>The deserialized //blp/refdata service.</summary>
     public static Service Service => _service;
+
+    /// <summary>
+    /// <see cref="TestUtil.DeserializeService(string)"/>, one call at a time, which
+    /// two test classes loading their schemas at once need.
+    /// </summary>
+    /// <param name="schema">A service definition, as XML.</param>
+    /// <returns>The service.</returns>
+    public static Service DeserializeService(string schema)
+    {
+        lock (_deserializeLock)
+        {
+            return TestUtil.DeserializeService(schema);
+        }
+    }
 
     /// <summary>An event holding one response message of an operation.</summary>
     /// <param name="operation">An operation name, such as ReferenceDataRequest.</param>

@@ -515,6 +515,151 @@ public class ElementParserTests
         Assert.Equal("", asText.SubelementValue(fieldData, topHolder));
     }
 
+    /// <summary>
+    /// Now and a stamp, as New York instants, for the latest-past dating theory.
+    /// </summary>
+    public static TheoryData<string, string, string> LatestPastCases
+    {
+        get
+        {
+            string[][] pairs =
+            [
+                ["2026-06-16T08:44:00-04:00", "2026-06-15T21:40:51-04:00"],
+                ["2026-06-16T08:44:00-04:00", "2026-06-16T03:41:56-04:00"],
+                ["2026-06-16T08:44:00-04:00", "2026-06-16T09:43:00-04:00"],
+                ["2026-06-16T08:44:00-04:00", "2026-06-16T09:44:00-04:00"],
+                ["2026-06-16T08:44:00-04:00", "2026-06-15T09:45:00-04:00"],
+                ["2026-11-01T08:44:00-05:00", "2026-10-31T21:40:51-04:00"],
+                ["2026-06-16T12:00:00-04:00", "2026-06-16T11:00:00-04:00"],
+                ["2026-06-16T22:30:00-04:00", "2026-06-16T22:00:00-04:00"],
+                ["2026-11-01T01:10:00-04:00", "2026-11-01T01:30:00-04:00"],
+                ["2026-06-16T23:30:00-04:00", "2026-06-17T00:10:00-04:00"],
+                ["2026-06-16T23:30:00+00:00", "2026-06-16T20:10:00-04:00"],
+            ];
+            TheoryData<string, string, string> cases = [];
+            foreach (string zoneId in (string[])["UTC", "America/New_York", "Australia/Sydney"])
+            {
+                foreach (string[] pair in pairs)
+                {
+                    cases.Add(zoneId, pair[0], pair[1]);
+                }
+            }
+
+            return cases;
+        }
+    }
+
+    /// <summary>
+    /// With latest-past dating, a time alone is dated at its latest instant up to one
+    /// hour past the clock.
+    /// </summary>
+    /// <remarks>
+    /// Mutation: the date of now in place of now plus the allowance, the previous-day
+    /// step dropped, &gt;= for &gt;, a day taken as 24 hours, or another allowance.
+    /// Oracle: hand-picked instants either side of and at one hour past now, sent as
+    /// their time of day in the assumed zone; each comes back as itself.
+    /// </remarks>
+    /// <param name="zoneId">The assumed zone.</param>
+    /// <param name="now">The clock.</param>
+    /// <param name="stamp">The instant whose time of day is sent.</param>
+    [Theory]
+    [MemberData(nameof(LatestPastCases))]
+    public void LatestPastDatingGivesTheStamp(string zoneId, string now, string stamp)
+    {
+        var zone = TimeZoneInfo.FindSystemTimeZoneById(zoneId);
+        var sent = TimeZoneInfo.ConvertTime(
+            DateTimeOffset.Parse(stamp, CultureInfo.InvariantCulture), zone);
+        var parser = new ElementParser(
+            TimeZoneInfo.FindSystemTimeZoneById("America/New_York"),
+            forceString: false,
+            timeAsDateTime: true,
+            new FakeTimeProvider(DateTimeOffset.Parse(now, CultureInfo.InvariantCulture)),
+            assumedTimeZone: zone,
+            datesTimeAtLatestPast: true);
+        var fieldData = RefDataEvents.FieldData(
+            $"<LAST_TIME>{sent:HH:mm:ss}.000</LAST_TIME>");
+
+        var value = Assert.IsType<DateTimeOffset>(
+            parser.SubelementValue(fieldData, Name.GetName("LAST_TIME")));
+        Assert.Equal(stamp, value.ToString("yyyy-MM-ddTHH:mm:sszzz", CultureInfo.InvariantCulture));
+    }
+
+    /// <summary>
+    /// With latest-past dating and no timeAsDateTime, a time alone comes back as a time
+    /// in the parser's zone.
+    /// </summary>
+    /// <remarks>
+    /// Mutation: the zone conversion dropped, which returns 01:40:51.
+    /// Oracle: hand-worked: 2026-11-01 01:40:51Z is 2026-10-31 21:40:51 EDT.
+    /// </remarks>
+    [Fact]
+    public void LatestPastDatingGivesATimeInTheZone()
+    {
+        var parser = new ElementParser(
+            TimeZoneInfo.FindSystemTimeZoneById("America/New_York"),
+            forceString: false,
+            timeAsDateTime: false,
+            new FakeTimeProvider(new DateTimeOffset(2026, 11, 1, 13, 44, 0, TimeSpan.Zero)),
+            assumedTimeZone: TimeZoneInfo.Utc,
+            datesTimeAtLatestPast: true);
+        var fieldData = RefDataEvents.FieldData("<LAST_TIME>01:40:51.000</LAST_TIME>");
+
+        Assert.Equal(
+            new TimeOnly(21, 40, 51), parser.SubelementValue(fieldData, Name.GetName("LAST_TIME")));
+    }
+
+    /// <summary>
+    /// A wall clock that a DST change skips or repeats resolves as opendate resolves
+    /// it.
+    /// </summary>
+    /// <remarks>
+    /// Mutation: one offset rule used for all three cases (a date-time sent, a time
+    /// dated today, a time moved back a day), the rules swapped, or the change found
+    /// with IsInvalidTime and IsAmbiguousTime, which miss Vancouver's last changes.
+    /// Oracle: opendate's instant for each zone, clock and wall clock.
+    /// </remarks>
+    /// <param name="zoneId">The assumed zone.</param>
+    /// <param name="now">The clock, or null for a date-time.</param>
+    /// <param name="sent">The wall clock or time of day sent.</param>
+    /// <param name="expectedUtc">The instant opendate gives, in UTC.</param>
+    [Theory]
+    [InlineData("America/New_York", null, "2026-03-08T02:00:00", "2026-03-08T06:00:00")]
+    [InlineData("America/New_York", null, "2026-11-01T01:00:00", "2026-11-01T05:00:00")]
+    [InlineData("America/New_York", "2026-03-08T06:00:00Z", "02:00:00", "2026-03-08T07:00:00")]
+    [InlineData("America/New_York", "2026-11-01T04:00:00Z", "01:00:00", "2026-11-01T05:00:00")]
+    [InlineData("America/New_York", "2026-03-09T04:00:00Z", "02:00:00", "2026-03-08T07:00:00")]
+    [InlineData("America/New_York", "2026-11-02T04:00:00Z", "01:00:00", "2026-11-01T06:00:00")]
+    [InlineData("Australia/Lord_Howe", null, "2026-10-04T02:00:00", "2026-10-03T15:00:00")]
+    [InlineData("Australia/Lord_Howe", null, "2026-04-05T01:30:00", "2026-04-04T14:30:00")]
+    [InlineData("Australia/Lord_Howe", "2026-10-03T14:30:00Z", "02:00:00", "2026-10-03T15:30:00")]
+    [InlineData("Australia/Lord_Howe", "2026-04-04T13:59:00Z", "01:30:00", "2026-04-04T14:30:00")]
+    [InlineData("Australia/Lord_Howe", "2026-10-04T12:30:00Z", "02:00:00", "2026-10-03T15:30:00")]
+    [InlineData("Australia/Lord_Howe", "2026-04-05T12:30:00Z", "01:30:00", "2026-04-04T15:00:00")]
+    [InlineData("America/Vancouver", "2026-03-08T09:30:00Z", "02:30:00", "2026-03-08T10:30:00")]
+    [InlineData("America/Vancouver", "2025-11-03T08:00:00Z", "01:30:00", "2025-11-02T09:30:00")]
+    public void DstChangeWallClockMatchesOpendate(
+        string zoneId, string? now, string sent, string expectedUtc)
+    {
+        var parser = new ElementParser(
+            TimeZoneInfo.Utc,
+            forceString: false,
+            timeAsDateTime: true,
+            new FakeTimeProvider(now is null
+                ? DateTimeOffset.UnixEpoch
+                : DateTimeOffset.Parse(now, CultureInfo.InvariantCulture)),
+            assumedTimeZone: TimeZoneInfo.FindSystemTimeZoneById(zoneId),
+            datesTimeAtLatestPast: true);
+        string field = now is null ? "LAST_STAMP" : "LAST_TIME";
+        string text = now is null ? $"{sent}.000+00:00" : $"{sent}.000";
+        var fieldData = RefDataEvents.FieldData($"<{field}>{text}</{field}>");
+
+        var value = Assert.IsType<DateTimeOffset>(
+            parser.SubelementValue(fieldData, Name.GetName(field)));
+        Assert.Equal(
+            expectedUtc,
+            value.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture));
+    }
+
     private static object? Value(ElementParser parser, string field) =>
         parser.SubelementValue(_fieldData, Name.GetName(field));
 }

@@ -3,7 +3,8 @@ using Bloomberglp.Blpapi;
 namespace Blp.Internal;
 
 /// <summary>
-/// The part of a Bloomberg session that <see cref="BlpClient"/> uses.
+/// The part of a Bloomberg session that <see cref="BlpClient"/> and
+/// <see cref="Subscriptions.Subscription"/> use.
 /// </summary>
 internal interface IBlpSession : IDisposable
 {
@@ -31,4 +32,25 @@ internal interface IBlpSession : IDisposable
     /// The session is not started.
     /// </exception>
     void SendRequest(Request request, CorrelationID correlationId);
+
+    /// <summary>
+    /// Subscribes topics. Each answers with a SUBSCRIPTION_STATUS event.
+    /// </summary>
+    /// <param name="subscriptions">The topics, each with its correlation id.</param>
+    /// <exception cref="InvalidOperationException">
+    /// The session is not started. No topic of the list is subscribed.
+    /// </exception>
+    void Subscribe(IList<Subscription> subscriptions);
+
+    /// <summary>Cancels subscriptions by their correlation ids.</summary>
+    /// <param name="subscriptions">The subscriptions to cancel.</param>
+    /// <exception cref="InvalidOperationException">
+    /// The session is not started.
+    /// </exception>
+    void Unsubscribe(IList<Subscription> subscriptions);
+
+    /// <summary>
+    /// Begins stopping the session and returns at once. SessionTerminated follows.
+    /// </summary>
+    void BeginStop();
 }

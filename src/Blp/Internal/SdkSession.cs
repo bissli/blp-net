@@ -23,5 +23,33 @@ internal sealed class SdkSession(Session session) : IBlpSession
         session.SendRequest(request, correlationId);
 
     /// <inheritdoc/>
+    public void Subscribe(IList<Subscription> subscriptions) => session.Subscribe(subscriptions);
+
+    /// <inheritdoc/>
+    public void Unsubscribe(IList<Subscription> subscriptions) =>
+        session.Unsubscribe(subscriptions);
+
+    /// <inheritdoc/>
+    public void BeginStop() => session.Stop(AbstractSession.StopOption.ASYNC);
+
+    /// <inheritdoc/>
     public void Dispose() => session.Dispose();
+
+    /// <summary>
+    /// Options for a session on localhost:8194 with OS logon.
+    /// </summary>
+    /// <param name="applicationIdentityKey">Null connects without one.</param>
+    /// <returns>The options.</returns>
+    public static SessionOptions CreateOptions(string? applicationIdentityKey)
+    {
+        var sessionOptions = new SessionOptions
+        {
+            ServerHost = "localhost",
+            ServerPort = 8194,
+            AuthenticationOptions = "AuthenticationType=OS_LOGON",
+            MaxEventQueueSize = 10000,
+        };
+        if (applicationIdentityKey is { } key) sessionOptions.ApplicationIdentityKey = key;
+        return sessionOptions;
+    }
 }

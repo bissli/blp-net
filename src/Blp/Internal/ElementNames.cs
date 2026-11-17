@@ -16,6 +16,7 @@ internal static class ElementNames
     public static readonly Name Category = Name.GetName("category");
     public static readonly Name Currency = Name.GetName("currency");
     public static readonly Name Date = Name.GetName("date");
+    public static readonly Name Description = Name.GetName("description");
     public static readonly Name EndDate = Name.GetName("endDate");
     public static readonly Name EndDateTime = Name.GetName("endDateTime");
     public static readonly Name ErrorInfo = Name.GetName("errorInfo");
@@ -50,10 +51,15 @@ internal static class ElementNames
     public static readonly Name Security = Name.GetName("security");
     public static readonly Name SecurityData = Name.GetName("securityData");
     public static readonly Name SecurityError = Name.GetName("securityError");
+    public static readonly Name SessionConnectionDown = Name.GetName("SessionConnectionDown");
+    public static readonly Name SessionConnectionUp = Name.GetName("SessionConnectionUp");
     public static readonly Name SessionTerminated = Name.GetName("SessionTerminated");
     public static readonly Name StartDate = Name.GetName("startDate");
     public static readonly Name StartDateTime = Name.GetName("startDateTime");
     public static readonly Name Subcategory = Name.GetName("subcategory");
+    public static readonly Name SubscriptionFailure = Name.GetName("SubscriptionFailure");
+    public static readonly Name SubscriptionStarted = Name.GetName("SubscriptionStarted");
+    public static readonly Name SubscriptionTerminated = Name.GetName("SubscriptionTerminated");
     public static readonly Name TickData = Name.GetName("tickData");
     public static readonly Name UseUtcTime = Name.GetName("useUTCTime");
     public static readonly Name Value = Name.GetName("value");

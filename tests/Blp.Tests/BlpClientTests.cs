@@ -64,6 +64,18 @@ public class BlpClientTests
 
         public void Stop() => StopCount++;
 
+        public void Subscribe(IList<Subscription> subscriptions)
+        {
+        }
+
+        public void Unsubscribe(IList<Subscription> subscriptions)
+        {
+        }
+
+        public void BeginStop()
+        {
+        }
+
         public void Dispose() => DisposeCount++;
     }
 }
