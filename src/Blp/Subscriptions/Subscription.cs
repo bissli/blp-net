@@ -1,6 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using Bloomberglp.Blpapi;
 using Blp.Internal;
+using Microsoft.Extensions.Logging;
 using SdkSubscription = Bloomberglp.Blpapi.Subscription;
 
 namespace Blp.Subscriptions;
@@ -12,7 +13,7 @@ namespace Blp.Subscriptions;
 /// <remarks>
 /// <see cref="Stop"/> is the only way to release the session.
 /// </remarks>
-public sealed class Subscription : IDisposable
+public sealed partial class Subscription : IDisposable
 {
     private const string MarketDataServiceName = "//blp/mktdata";
 
@@ -25,6 +26,7 @@ public sealed class Subscription : IDisposable
     private readonly IReadOnlyList<string> _subscribeOptions;
     private readonly Action<string, IReadOnlyDictionary<string, object?>> _onTick;
     private readonly TimeProvider _timeProvider;
+    private readonly ILogger _logger;
     private readonly ElementParser _parser;
     private readonly IBlpSession _session;
     private readonly Lock _lock = new();
@@ -59,6 +61,7 @@ public sealed class Subscription : IDisposable
             : [];
         _onTick = onTick;
         _timeProvider = timeProvider;
+        _logger = options.Logger;
         _parser = new ElementParser(
             TimeZoneInfo.Local,
             forceString: false,
@@ -367,7 +370,12 @@ public sealed class Subscription : IDisposable
         }
 
         if (Environment.CurrentManagedThreadId == _dispatchThreadId) return false;
-        if (!_terminated.Task.Wait(wait)) return false;
+        if (!_terminated.Task.Wait(wait))
+        {
+            LogStopTimedOut(_logger, wait);
+            return false;
+        }
+
         lock (_lock)
         {
             if (_released) return true;
@@ -481,14 +489,17 @@ public sealed class Subscription : IDisposable
             }
 
             var now = _timeProvider.GetUtcNow();
+            string? topic;
             lock (_lock)
             {
-                if (!TryTopicOf(message, out string? topic)) continue;
+                if (!TryTopicOf(message, out topic)) continue;
                 var state = _states[topic];
                 _states[topic] = started
                     ? state with { Status = TopicStatus.Subscribed, SubscribedAt = now }
                     : state with { Status = TopicStatus.Failed, Reason = reason };
             }
+
+            if (!started) LogTopicFailed(_logger, messageType, topic, reason);
         }
     }
 
@@ -508,6 +519,7 @@ public sealed class Subscription : IDisposable
                 // be reused once it exits.
                 _dispatchThreadId = 0;
                 _terminated.TrySetResult();
+                LogSessionTerminated(_logger);
             }
             else if (messageType.Equals(ElementNames.SessionConnectionDown))
             {
@@ -515,6 +527,8 @@ public sealed class Subscription : IDisposable
                 {
                     _connected = false;
                 }
+
+                LogConnectionDown(_logger);
             }
             else if (messageType.Equals(ElementNames.SessionConnectionUp))
             {
@@ -522,6 +536,20 @@ public sealed class Subscription : IDisposable
                 {
                     _connected = true;
                 }
+
+                LogConnectionUp(_logger);
+            }
+            else if (messageType.Equals(ElementNames.SlowConsumerWarning))
+            {
+                LogSlowConsumer(_logger);
+            }
+            else if (messageType.Equals(ElementNames.SlowConsumerWarningCleared))
+            {
+                LogSlowConsumerCleared(_logger);
+            }
+            else if (messageType.Equals(ElementNames.DataLoss))
+            {
+                LogDataLoss(_logger, message.ToString());
             }
         }
     }
@@ -533,12 +561,72 @@ public sealed class Subscription : IDisposable
             && _topicByCorrelationId.TryGetValue(correlationId, out topic);
     }
 
+    // Only the first error is logged with its stack trace, since a broken onTick fails
+    // on every tick.
     private void RecordError(string topic, Exception error)
     {
+        string errorText = $"{error.GetType().Name}: {error.Message}";
+        bool first;
         lock (_lock)
         {
             _errorCount++;
-            _lastError = $"{topic}: {error.GetType().Name}: {error.Message}";
+            _lastError = $"{topic}: {errorText}";
+            first = _errorCount == 1;
+        }
+
+        if (first)
+        {
+            LogFirstError(_logger, topic, error);
+        }
+        else
+        {
+            LogLaterError(_logger, topic, errorText);
         }
     }
+
+    [LoggerMessage(
+        EventId = 1,
+        Level = LogLevel.Error,
+        Message = "Subscription {MessageType} topic={Topic} desc={Description}")]
+    private static partial void LogTopicFailed(
+        ILogger logger, Name messageType, string topic, string? description);
+
+    [LoggerMessage(
+        EventId = 2, Level = LogLevel.Information, Message = "Bloomberg session terminated")]
+    private static partial void LogSessionTerminated(ILogger logger);
+
+    [LoggerMessage(EventId = 3, Level = LogLevel.Warning, Message = "Bloomberg connection down")]
+    private static partial void LogConnectionDown(ILogger logger);
+
+    [LoggerMessage(EventId = 4, Level = LogLevel.Information, Message = "Bloomberg connection up")]
+    private static partial void LogConnectionUp(ILogger logger);
+
+    [LoggerMessage(
+        EventId = 5,
+        Level = LogLevel.Warning,
+        Message = "Event queue nearly full; ticks may be dropped")]
+    private static partial void LogSlowConsumer(ILogger logger);
+
+    [LoggerMessage(
+        EventId = 6, Level = LogLevel.Warning, Message = "Event queue no longer nearly full")]
+    private static partial void LogSlowConsumerCleared(ILogger logger);
+
+    [LoggerMessage(
+        EventId = 7,
+        Level = LogLevel.Warning,
+        Message = "Event queue overflowed, data lost: {DataLoss}")]
+    private static partial void LogDataLoss(ILogger logger, string dataLoss);
+
+    [LoggerMessage(EventId = 8, Level = LogLevel.Error, Message = "Subscription error on {Topic}")]
+    private static partial void LogFirstError(ILogger logger, string topic, Exception error);
+
+    [LoggerMessage(
+        EventId = 9, Level = LogLevel.Debug, Message = "Subscription error on {Topic}: {Error}")]
+    private static partial void LogLaterError(ILogger logger, string topic, string error);
+
+    [LoggerMessage(
+        EventId = 10,
+        Level = LogLevel.Warning,
+        Message = "Bloomberg session did not stop within {Timeout}")]
+    private static partial void LogStopTimedOut(ILogger logger, TimeSpan timeout);
 }

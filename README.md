@@ -127,6 +127,12 @@ each topic's state and, in `Failure`, why the subscription can no longer
 deliver data. `Remove` drops topics, and `Stop` or `Dispose` ends the
 session.
 
+`SubscriptionOptions.Logger` takes an `ILogger` for topic failures,
+connection and event-queue warnings, a `Stop` that times out, and
+errors from the callback. The first callback error logs with its
+exception, and each later one at debug level, since a broken callback
+fails on every tick. The default logger discards every line.
+
 A response keys its values by the security string Bloomberg echoes. A
 rejected security or field appears in `SecurityErrors` or `FieldErrors`
 and leaves no value. A reference or historical request with

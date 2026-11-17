@@ -6,6 +6,7 @@
 
   <ItemGroup>
     <PackageReference Include="Bloomberg.Blpapi" Version="3.26.10.1" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.14" />
   </ItemGroup>
 
   <ItemGroup>

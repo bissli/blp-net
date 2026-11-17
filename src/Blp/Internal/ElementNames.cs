@@ -18,6 +18,7 @@ internal static class ElementNames
     public static readonly Name ClientContext = Name.GetName("clientContext");
     public static readonly Name Currency = Name.GetName("currency");
     public static readonly Name Data = Name.GetName("data");
+    public static readonly Name DataLoss = Name.GetName("DataLoss");
     public static readonly Name Date = Name.GetName("date");
     public static readonly Name Description = Name.GetName("description");
     public static readonly Name EndDate = Name.GetName("endDate");
@@ -61,6 +62,9 @@ internal static class ElementNames
     public static readonly Name SessionConnectionDown = Name.GetName("SessionConnectionDown");
     public static readonly Name SessionConnectionUp = Name.GetName("SessionConnectionUp");
     public static readonly Name SessionTerminated = Name.GetName("SessionTerminated");
+    public static readonly Name SlowConsumerWarning = Name.GetName("SlowConsumerWarning");
+    public static readonly Name SlowConsumerWarningCleared =
+        Name.GetName("SlowConsumerWarningCleared");
     public static readonly Name StartDate = Name.GetName("startDate");
     public static readonly Name StartDateTime = Name.GetName("startDateTime");
     public static readonly Name Subcategory = Name.GetName("subcategory");

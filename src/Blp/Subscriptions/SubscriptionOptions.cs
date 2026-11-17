@@ -1,3 +1,6 @@
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+
 namespace Blp.Subscriptions;
 
 /// <summary>
@@ -16,4 +19,10 @@ public sealed record SubscriptionOptions
     /// updates unconflated.
     /// </summary>
     public TimeSpan Interval { get; init; }
+
+    /// <summary>
+    /// Receives topic failures, connection and event-queue warnings, and callback
+    /// errors. The default discards them.
+    /// </summary>
+    public ILogger Logger { get; init; } = NullLogger.Instance;
 }
