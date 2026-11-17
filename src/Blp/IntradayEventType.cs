@@ -29,4 +29,13 @@ public enum IntradayEventType
 
     /// <summary>Bloomberg BEST_ASK.</summary>
     BestAsk,
+
+    /// <summary>Bloomberg BID_YIELD.</summary>
+    BidYield,
+
+    /// <summary>Bloomberg ASK_YIELD.</summary>
+    AskYield,
+
+    /// <summary>Bloomberg SETTLE.</summary>
+    Settle,
 }

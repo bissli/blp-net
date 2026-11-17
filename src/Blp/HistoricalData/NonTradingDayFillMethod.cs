@@ -8,4 +8,7 @@ public enum NonTradingDayFillMethod
 
     /// <summary>Bloomberg NIL_VALUE.</summary>
     NilValue,
+
+    /// <summary>Bloomberg NEXTDAY_VALUE.</summary>
+    NextdayValue,
 }

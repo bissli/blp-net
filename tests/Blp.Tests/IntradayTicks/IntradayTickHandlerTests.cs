@@ -1,4 +1,5 @@
 using Bloomberglp.Blpapi;
+using Blp.Internal;
 using Blp.IntradayTicks;
 
 namespace Blp.Tests.IntradayTicks;
@@ -39,6 +40,21 @@ public class IntradayTickHandlerTests
         Assert.Equal(new DateTime(2024, 3, 15, 9, 30, 0), start.ToSystemDateTime());
         Assert.Equal(new DateTime(2024, 3, 15, 11, 0, 0), end.ToSystemDateTime());
     }
+
+    /// <summary>Every event type maps to a Bloomberg enumerator.</summary>
+    /// <remarks>
+    /// Mutation: a member whose name maps to no enumerator, such as BidYields.
+    /// Oracle: the EventType enumerators of the //blp/refdata schema, in member order.
+    /// </remarks>
+    [Fact]
+    public void EveryEventTypeNamesASchemaEnumerator() =>
+        Assert.Equal(
+            [
+                "TRADE", "BID", "ASK", "BID_BEST", "ASK_BEST", "MID_PRICE", "AT_TRADE",
+                "BEST_BID", "BEST_ASK", "BID_YIELD", "ASK_YIELD", "SETTLE",
+            ],
+            Enum.GetValues<IntradayEventType>()
+                .Select(eventType => ElementNames.BloombergName(eventType)));
 
     /// <summary>
     /// Each include flag set sends its Bloomberg element as true; an unset one is

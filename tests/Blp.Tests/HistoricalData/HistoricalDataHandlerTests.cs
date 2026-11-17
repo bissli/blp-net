@@ -1,5 +1,6 @@
 using Bloomberglp.Blpapi;
 using Blp.HistoricalData;
+using Blp.Internal;
 using Microsoft.Extensions.Time.Testing;
 
 namespace Blp.Tests.HistoricalData;
@@ -80,6 +81,18 @@ public class HistoricalDataHandlerTests
         var entry = sent.GetElement(Name.GetName("overrides")).GetValueAsElement(0);
         Assert.Equal("1BF", entry.GetElementAsString(Name.GetName("value")));
     }
+
+    /// <summary>Every fill method maps to a Bloomberg enumerator.</summary>
+    /// <remarks>
+    /// Mutation: a member spelled NextDayValue, which maps to NEXT_DAY_VALUE.
+    /// Oracle: the NonTradingDayFillMethod enumerators of the //blp/refdata schema.
+    /// </remarks>
+    [Fact]
+    public void EveryFillMethodNamesASchemaEnumerator() =>
+        Assert.Equal(
+            ["PREVIOUS_VALUE", "NIL_VALUE", "NEXTDAY_VALUE"],
+            Enum.GetValues<NonTradingDayFillMethod>()
+                .Select(method => ElementNames.BloombergName(method)));
 
     /// <summary>
     /// An option left null is not sent, so Bloomberg's default holds.
