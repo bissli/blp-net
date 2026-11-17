@@ -19,7 +19,7 @@ public sealed record ReferenceDataRequest(
 
     /// <summary>
     /// Return every value as a string: "" for null, a number in plain notation, a bulk
-    /// field as JSON text in the Python blp's format.
+    /// field as JSON text: a list of {name: value} objects.
     /// </summary>
     public bool ForceString { get; init; }
 

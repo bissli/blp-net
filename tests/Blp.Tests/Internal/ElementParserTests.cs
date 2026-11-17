@@ -50,13 +50,14 @@ public class ElementParserTests
         Assert.Equal(expected, ElementParser.TrimNumber(text));
 
     /// <summary>
-    /// PythonJsonString escapes as Python's json.dumps does by default.
+    /// JsonStringLiteral escapes a quote, a backslash and every character outside
+    /// printable ASCII.
     /// </summary>
     /// <remarks>
     /// Mutation: System.Text.Json escaping (a quote as a hex escape, upper-case hex,
     /// "/" or non-ASCII left raw), or a missed \b \f short escape.
-    /// Oracle: json.dumps run on each input
-    /// (.handoff/csharp-port/probes/trim_oracle.py).
+    /// Oracle: hand-worked JSON escapes: lower-case hex, non-ASCII as UTF-16 units,
+    /// short escapes for \b \t \n \f \r.
     /// </remarks>
     [Theory]
     [InlineData("plain", "\"plain\"")]
@@ -69,20 +70,20 @@ public class ElementParserTests
     [InlineData("euro\u20ac", "\"euro\\u20ac\"")]
     [InlineData("emoji\U0001F600", "\"emoji\\ud83d\\ude00\"")]
     [InlineData("/slash ~tilde", "\"/slash ~tilde\"")]
-    public void PythonJsonStringMatchesJsonDumps(string text, string expected) =>
-        Assert.Equal(expected, ElementParser.PythonJsonString(text));
+    public void JsonStringLiteralEscapesQuoteBackslashAndNonAscii(string text, string expected) =>
+        Assert.Equal(expected, ElementParser.JsonStringLiteral(text));
 
     /// <summary>
-    /// ForceString turns each element kind into the Python blp's text.
+    /// ForceString turns each element kind into text.
     /// </summary>
     /// <remarks>
     /// Mutation: a number left untrimmed, a string left unstripped, or a bulk field
     /// as one object per row instead of one per subelement.
-    /// Oracle: the Python blp's element_as_value with force_string=True, worked by
-    /// hand on the same input.
+    /// Oracle: hand-worked text for each element of the input: a trimmed number, a
+    /// stripped string, a JSON list for the bulk field.
     /// </remarks>
     [Fact]
-    public void ForceStringGivesPythonText()
+    public void ForceStringGivesText()
     {
         var parser = new ElementParser(_plusFive, forceString: true, timeAsDateTime: false);
 
@@ -95,13 +96,13 @@ public class ElementParserTests
     }
 
     /// <summary>
-    /// ForceString writes a float as the Python SDK's printf %f text, then trims it.
+    /// ForceString writes a float as printf %f text, then trims it.
     /// </summary>
     /// <remarks>
     /// Mutation: the managed SDK's round-trip text used, or a tie rounded away from
     /// zero.
-    /// Oracle: the Python blpapi 3.26.10.1 getValueAsString text through
-    /// round_digit_string (.handoff/csharp-port/probes/sdk_text.py).
+    /// Oracle: hand-worked printf %f text, six decimals with an exact tie rounded to
+    /// even, then trailing zeros trimmed: 99.0078125 gives 99.007812.
     /// </remarks>
     [Theory]
     [InlineData("0.30000000000000004", "0.3")]
@@ -110,7 +111,7 @@ public class ElementParserTests
     [InlineData("99.0078125", "99.007812")]
     [InlineData("123456789.1234567", "123456789.123457")]
     [InlineData("1e20", "100000000000000000000")]
-    public void ForceStringFloatMatchesPythonSdkText(string sent, string expected)
+    public void ForceStringFloatMatchesPrintfText(string sent, string expected)
     {
         var parser = new ElementParser(_plusFive, forceString: true, timeAsDateTime: false);
         var fieldData = RefDataEvents.FieldData($"<PX_LAST>{sent}</PX_LAST>");
@@ -172,8 +173,8 @@ public class ElementParserTests
     /// <remarks>
     /// Mutation: !value.HasParts(Datetime.TIME) in place of the TimeParts test, which
     /// reads a time without seconds as a date.
-    /// Oracle: Python blpapi, which counts any one time part as a time; 14:30 UTC is
-    /// 19:30 at +05:00, worked by hand.
+    /// Oracle: any one time part makes a time; 14:30 UTC is 19:30 at +05:00, worked
+    /// by hand.
     /// </remarks>
     [Fact]
     public void TimeWithoutSecondsGivesTime()
@@ -190,9 +191,8 @@ public class ElementParserTests
     /// <summary>A time alone is returned as a time in the parser's zone.</summary>
     /// <remarks>
     /// Mutation: the zone conversion dropped, which returns 01:40:51.
-    /// Oracle: the Python blp test_time_only_as_time_in_desired_timezone expected
-    /// value, 01:40:51Z at -04:00 is 21:40:51. A fixed offset stands in for New York,
-    /// because the C# parser dates a time alone with the host's date.
+    /// Oracle: hand-worked: 01:40:51Z at -04:00 is 21:40:51. A fixed offset stands in
+    /// for New York, because the parser dates a time alone with the host's date.
     /// </remarks>
     [Fact]
     public void TimeAloneIsATimeInTheZone()
@@ -209,10 +209,8 @@ public class ElementParserTests
     /// <summary>A time alone is dated with the clock's local date.</summary>
     /// <remarks>
     /// Mutation: the date taken from the UTC clock, which dates the stamp a day ahead.
-    /// Oracle: the Python blp test_request_time_only_takes_machine_date expected value
-    /// for the UTC id: a New York machine at 22:30 on June 16 sees June 16, and the
-    /// value 23:59:58 UTC is 19:59:58 in New York. The New York assumed-zone id has no
-    /// C# input, as the parser reads every time as UTC.
+    /// Oracle: hand-worked: a New York machine at 22:30 on June 16 sees June 16, and
+    /// the value 23:59:58 UTC is 19:59:58 in New York.
     /// </remarks>
     [Fact]
     public void TimeAloneTakesTheClockLocalDate()
@@ -235,8 +233,7 @@ public class ElementParserTests
     /// <remarks>
     /// Mutation: a string element parsed as a number under forceString, which drops the
     /// leading zero of the first CUSIP.
-    /// Oracle: the Python blp test_string_identifier_kept_verbatim expected value, the
-    /// input CUSIP.
+    /// Oracle: the input CUSIP itself.
     /// </remarks>
     [Theory]
     [InlineData("046433108", true)]
@@ -256,8 +253,7 @@ public class ElementParserTests
     /// </summary>
     /// <remarks>
     /// Mutation: the string rounded as a number, which returns "1.5".
-    /// Oracle: the Python blp test_string_value_stripped_and_not_rounded expected
-    /// value, " 1.50 " trimmed to "1.50".
+    /// Oracle: hand-worked: " 1.50 " trimmed is "1.50".
     /// </remarks>
     [Theory]
     [InlineData(true)]
@@ -275,9 +271,7 @@ public class ElementParserTests
     /// </summary>
     /// <remarks>
     /// Mutation: rounding dropped for every type, so "7283.0" keeps its ".0".
-    /// Oracle: the Python blp test_numeric_element_still_rounded_under_force_string
-    /// expected value, "7283.0" to "7283". The 1.23 half needs decimal_places, which
-    /// the C# port dropped.
+    /// Oracle: hand-worked: "7283.0" with its trailing zeros dropped is "7283".
     /// </remarks>
     [Fact]
     public void NumberIsStillRoundedUnderForceString()
@@ -294,8 +288,8 @@ public class ElementParserTests
     /// <remarks>
     /// Mutation: the string subelement parsed as a number, which turns the CUSIP into
     /// "46433108", or rounding dropped, which leaves "0.2500".
-    /// Oracle: the Python blp test_bulk_field_json_rounds_only_numeric_subelements
-    /// expected value.
+    /// Oracle: hand-worked JSON: the CUSIP string kept as sent, the weight 0.2500
+    /// trimmed to 0.25.
     /// </remarks>
     [Fact]
     public void BulkFieldJsonRoundsOnlyNumericSubelements()
@@ -315,9 +309,8 @@ public class ElementParserTests
     /// <remarks>
     /// Mutation: names taken from the first row only, which drops currency, first seen
     /// in the last row.
-    /// Oracle: the Python blp test_bulk_field_dataframe_rows_with_different_fields
-    /// expected frame, null where a row omits a field. The weight is a number here,
-    /// where the Python test sent it as text.
+    /// Oracle: every row holds every name seen in any row, null where a row omits a
+    /// field.
     /// </remarks>
     [Fact]
     public void BulkRowsWithDifferentSubelementsShareEveryName()
@@ -364,8 +357,9 @@ public class ElementParserTests
     /// <remarks>
     /// Mutation: the offset read at the UTC wall clock as if it were zone time, or
     /// the zone's standard offset all year.
-    /// Oracle: the Python blp Parser on opendate
-    /// (.handoff/csharp-port/probes/opendate_diff_python.txt).
+    /// Oracle: hand-worked: New York shifts at 07:00 UTC on March 10 and 06:00 UTC on
+    /// November 3, London at 01:00 UTC on March 31, so 06:30 UTC on March 10 is 01:30
+    /// at -05:00.
     /// </remarks>
     [Theory]
     [InlineData("America/New_York", "2024-03-10T06:30:00", "2024-03-10T01:30:00-05:00")]
@@ -394,11 +388,11 @@ public class ElementParserTests
     }
 
     /// <summary>
-    /// A date-time keeps whole microseconds, as a Python datetime does.
+    /// A date-time keeps whole microseconds and drops finer ticks.
     /// </summary>
     /// <remarks>
     /// Mutation: the 100 ns tick kept, or the value rounded up.
-    /// Oracle: Python blpapi, which truncates to microseconds.
+    /// Oracle: hand-worked: .123456789 truncated to microseconds is .123456.
     /// </remarks>
     [Fact]
     public void DateTimeTruncatesToMicroseconds()
@@ -434,7 +428,7 @@ public class ElementParserTests
     /// <summary>A field the element lacks gives null.</summary>
     /// <remarks>
     /// Mutation: "" or NaN for a missing field, or an exception from GetElement.
-    /// Oracle: d06, which maps the Python blp's NaN for a missing field to null.
+    /// Oracle: d06, which maps a missing field to null.
     /// </remarks>
     [Fact]
     public void MissingFieldGivesNull()
@@ -450,7 +444,7 @@ public class ElementParserTests
     /// </summary>
     /// <remarks>
     /// Mutation: null for every null, or "" for a null number.
-    /// Oracle: the Python Parser, which gives NaN, NaT and '' for these nulls.
+    /// Oracle: a null number, date or time is null and any other null is "".
     /// </remarks>
     [Fact]
     public void NullValueGivesNullOrEmpty()
@@ -485,7 +479,7 @@ public class ElementParserTests
     /// <summary>A bulk row that omits a subelement holds null under its name.</summary>
     /// <remarks>
     /// Mutation: each row keyed only by its own subelements.
-    /// Oracle: the Python Parser, which gives one column per name seen in any row.
+    /// Oracle: every row holds one entry per name seen in any row.
     /// </remarks>
     [Fact]
     public void BulkRowMissingSubelementGivesNull()
@@ -502,10 +496,10 @@ public class ElementParserTests
         Assert.Equal(second, rows[1]);
     }
 
-    /// <summary>A sequence that is not an array gives no rows, as in Python.</summary>
+    /// <summary>A sequence that is not an array gives no rows.</summary>
     /// <remarks>
     /// Mutation: the single sequence read as one row.
-    /// Oracle: the Python Parser, which gives an empty frame and ''.
+    /// Oracle: no rows for the typed value and "" for the text value.
     /// </remarks>
     [Fact]
     public void SingleSequenceGivesNoRows()

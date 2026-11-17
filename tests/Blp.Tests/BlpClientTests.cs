@@ -9,8 +9,8 @@ public class BlpClientTests
     /// <remarks>
     /// Mutation: the client left undisposed when the check throws, which leaks the
     /// session.
-    /// Oracle: the Python blp test_failed_connectivity_test_stops_own_session expected
-    /// value, one cleanup. A recording session whose sendRequest fails.
+    /// Oracle: one stop and one dispose, the expected counts for a session whose
+    /// sendRequest fails, recorded by a recording session.
     /// </remarks>
     [Fact]
     public async Task FailedConnectivityCheckStopsOwnSession()
@@ -29,8 +29,8 @@ public class BlpClientTests
     /// <summary>A session that fails to start is disposed.</summary>
     /// <remarks>
     /// Mutation: the dispose call dropped before SessionCreateException.
-    /// Oracle: the Python blp test_failed_start_cleans_up_session expected value, one
-    /// cleanup. A recording session whose Start returns false.
+    /// Oracle: one dispose, the expected count for a session whose Start returns
+    /// false, recorded by a recording session.
     /// </remarks>
     [Fact]
     public async Task FailedStartDisposesTheSession()

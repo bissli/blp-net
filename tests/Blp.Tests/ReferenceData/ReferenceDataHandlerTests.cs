@@ -93,12 +93,11 @@ public class ReferenceDataHandlerTests
     }
 
     /// <summary>
-    /// A security sent again in a later message takes the later values, as the Python
-    /// blp's dict update does.
+    /// A security sent again in a later message takes the later values.
     /// </summary>
     /// <remarks>
     /// Mutation: a security already seen skipped, so the first message's value stays.
-    /// Oracle: the Python blp's on_security_data, which updates the ticker's dict.
+    /// Oracle: the later message's values replace the first's for the same ticker.
     /// </remarks>
     [Fact]
     public void LaterMessageUpdatesTheSecurity()
@@ -145,8 +144,8 @@ public class ReferenceDataHandlerTests
     /// <remarks>
     /// Mutation: a bare Exception raised, or ResponseException under SessionException,
     /// which a caller would read as a lost session.
-    /// Oracle: the Python blp test_response_error_is_typed expected value. The C#
-    /// text adds the element dump after the "REQUEST FAILED: " prefix.
+    /// Oracle: the exception class, with the text starting "REQUEST FAILED: " and
+    /// followed by the element dump.
     /// </remarks>
     [Fact]
     public void ResponseErrorIsNotASessionError()
@@ -171,8 +170,7 @@ public class ReferenceDataHandlerTests
     /// <remarks>
     /// Mutation: either option sent to Bloomberg as an override, or ForceString or
     /// TimeAsDateTime not passed on to the parser.
-    /// Oracle: the Python blp test_reference_data_passes_string_options expected value,
-    /// no overrides, the text of a number, and a time read as a date-time.
+    /// Oracle: no overrides, the text of a number, and a time read as a date-time.
     /// </remarks>
     [Fact]
     public void StringOptionsAreNotSentAsOverrides()
@@ -210,9 +208,8 @@ public class ReferenceDataHandlerTests
     /// <remarks>
     /// Mutation: RaiseFieldError wired to the security flag, or a security error raised
     /// with its flag off.
-    /// Oracle: the Python blp BaseRequest.raise_exception, which raises a kind only
-    /// when its flag is set. The response holds both kinds and only the field flag is
-    /// set.
+    /// Oracle: a kind raises only when its flag is set. The response holds both kinds
+    /// and only the field flag is set.
     /// </remarks>
     [Fact]
     public void OnlyTheRequestedErrorKindRaises()

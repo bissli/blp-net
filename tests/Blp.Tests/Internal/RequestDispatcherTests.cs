@@ -81,9 +81,8 @@ public class RequestDispatcherTests
     /// </summary>
     /// <remarks>
     /// Mutation: the deadline not reset on PARTIAL_RESPONSE.
-    /// Oracle: the Python blp test_partial_response_restarts_idle_limit expected value.
-    /// The response at 49 s is past one 30 s limit and within 30 s of the partial at
-    /// 20 s.
+    /// Oracle: hand-worked: the response at 49 s is past one 30 s limit and within
+    /// 30 s of the partial at 20 s.
     /// </remarks>
     [Fact]
     public void ResponseAfterRestartedIdleTimeoutCompletes()
@@ -104,10 +103,9 @@ public class RequestDispatcherTests
     /// <summary>The total limit ends a partial stream that never goes idle.</summary>
     /// <remarks>
     /// Mutation: the total deadline dropped, or restarted on each partial.
-    /// Oracle: the Python blp test_total_limit_ends_steady_partial_stream expected
-    /// value. A partial every 5 s under an 8 s idle limit and a 20 s total limit: the
-    /// request is open one tick before 20 s and fails at 20 s with a total-limit
-    /// message.
+    /// Oracle: hand-worked: a partial every 5 s under an 8 s idle limit and a 20 s
+    /// total limit leaves the request open one tick before 20 s, and it fails at 20 s
+    /// with a total-limit message.
     /// </remarks>
     [Fact]
     public void TotalLimitEndsSteadyPartialStream()
@@ -186,9 +184,8 @@ public class RequestDispatcherTests
     /// <remarks>
     /// Mutation: a partial that does not restart the idle timeout, or a default total
     /// limit, which ends the stream before its response.
-    /// Oracle: the Python blp test_no_total_limit_lets_steady_stream_finish expected
-    /// value. A partial every 5 s under an 8 s idle limit, 20 times, then a response:
-    /// 21 events.
+    /// Oracle: hand-worked: a partial every 5 s under an 8 s idle limit, 20 times, then
+    /// a response is 21 events.
     /// </remarks>
     [Fact]
     public void SteadyPartialStreamFinishesUnderIdleLimit()
@@ -216,9 +213,8 @@ public class RequestDispatcherTests
     /// </summary>
     /// <remarks>
     /// Mutation: the timer reset before the correlation id check.
-    /// Oracle: the Python blp test_stale_partial_does_not_restart_idle_limit expected
-    /// value. The stale partial at 20 s of a 30 s limit changes nothing, so the limit
-    /// still expires at 30 s.
+    /// Oracle: hand-worked: the stale partial at 20 s of a 30 s limit changes nothing,
+    /// so the limit still expires at 30 s.
     /// </remarks>
     [Fact]
     public void StalePartialDoesNotRestartTheIdleTimeout()
@@ -240,8 +236,7 @@ public class RequestDispatcherTests
     /// <remarks>
     /// Mutation: the correlation id filter dropped, so the stale response ends the
     /// request or feeds its handler.
-    /// Oracle: the Python blp test_stale_response_is_skipped expected value. The
-    /// handler receives exactly one event.
+    /// Oracle: the handler receives exactly one event, the request's own response.
     /// </remarks>
     [Fact]
     public void StaleResponseIsSkipped()
@@ -282,7 +277,8 @@ public class RequestDispatcherTests
     /// </summary>
     /// <remarks>
     /// Mutation: one exception type for every category, or the category dropped.
-    /// Oracle: the categories the Python blp maps to a session error.
+    /// Oracle: the CONNECTION_DEAD and SERVICE_NOT_AVAILABLE categories are session
+    /// errors, and LIMIT is a response failure.
     /// </remarks>
     [Theory]
     [InlineData("CONNECTION_DEAD", typeof(SessionNotAvailableException))]
@@ -320,8 +316,7 @@ public class RequestDispatcherTests
     /// <remarks>
     /// Mutation: every RequestFailure raised as a session error, which a caller would
     /// read as a lost session.
-    /// Oracle: the Python blp test_bad_request_failure_is_not_session_error expected
-    /// value, a BAD_ARGS failure.
+    /// Oracle: a BAD_ARGS failure is a response failure, not a session error.
     /// </remarks>
     [Fact]
     public void BadRequestFailureIsNotASessionError()
@@ -340,8 +335,8 @@ public class RequestDispatcherTests
     /// <remarks>
     /// Mutation: a REQUEST_STATUS failure that fails the first pending request, or a
     /// CONNECTION_DEAD status that fails every request before the id check.
-    /// Oracle: the Python blp test_stale_failure_is_skipped expected value. A stale
-    /// CONNECTION_DEAD failure, then this request's response completes it.
+    /// Oracle: a stale CONNECTION_DEAD failure leaves the request pending, and this
+    /// request's response then completes it.
     /// </remarks>
     [Fact]
     public void StaleFailureIsSkipped()

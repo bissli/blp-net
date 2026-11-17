@@ -155,8 +155,7 @@ public class HistoricalDataHandlerTests
     /// <remarks>
     /// Mutation: the field errors of a historical securityData element dropped, or the
     /// message and subcategory left out of the record.
-    /// Oracle: the Python blp test_historical_field_error_recorded expected FieldError
-    /// and PX_LAST value.
+    /// Oracle: the FieldError and the PX_LAST value that the response XML holds.
     /// </remarks>
     [Fact]
     public void FieldErrorIsRecorded()
@@ -194,8 +193,7 @@ public class HistoricalDataHandlerTests
     /// <remarks>
     /// Mutation: the start or end date sent a day off, as a conversion through a
     /// DateTime at midnight in another zone would.
-    /// Oracle: the Python blp test_historical_date_in_own_timezone expected value for
-    /// its date(2024, 1, 2) input. The string and datetime inputs have no C# form.
+    /// Oracle: hand-worked: the date January 2, 2024 is the text 20240102.
     /// </remarks>
     [Fact]
     public void DateIsSentAsItsOwnCalendarDate()
@@ -212,9 +210,7 @@ public class HistoricalDataHandlerTests
     /// <summary>A missing start is the day before the end's own date.</summary>
     /// <remarks>
     /// Mutation: the start taken from the host's date, or left equal to the end.
-    /// Oracle: the Python blp test_historical_missing_start_is_day_before_end expected
-    /// value for the end date January 2, 2024. The string end with an offset has no C#
-    /// form, since a caller passes a DateOnly.
+    /// Oracle: hand-worked: the day before January 2, 2024 is 20240101.
     /// </remarks>
     [Fact]
     public void MissingStartIsTheDayBeforeEnd()
@@ -233,8 +229,8 @@ public class HistoricalDataHandlerTests
     /// <remarks>
     /// Mutation: the end taken from the UTC date, which sends 20240102 and a start of
     /// 20240101 on a host east of UTC between local midnight and 00:00 UTC.
-    /// Oracle: the Python blp test_historical_missing_end_is_host_date expected value.
-    /// A Tokyo host at 08:00 on January 3 is 23:00 UTC on January 2.
+    /// Oracle: hand-worked: a Tokyo host at 08:00 on January 3 is 23:00 UTC on
+    /// January 2, so the host date is 20240103.
     /// </remarks>
     [Fact]
     public void MissingEndIsTheHostLocalDate()
@@ -257,8 +253,8 @@ public class HistoricalDataHandlerTests
     /// <remarks>
     /// Mutation: a false flag treated as unset, a flag sent under another element's
     /// name, or the calendar code left out.
-    /// Oracle: the Python blp set_flag, which sends every flag that is not None, and
-    /// the HistoricalDataRequest element names. Each row sets one flag true and the
+    /// Oracle: the documented HistoricalDataRequest element names, with every flag
+    /// that is not null sent. Each row sets one flag true and the
     /// other three false, so a swap of any two flags moves the true value.
     /// </remarks>
     [Theory]
@@ -292,7 +288,7 @@ public class HistoricalDataHandlerTests
     /// <summary>An adjustment option left null is not sent.</summary>
     /// <remarks>
     /// Mutation: a null flag sent as false, or an empty calendar code sent.
-    /// Oracle: the Python blp set_flag, which skips a flag that is None.
+    /// Oracle: the request element holds no adjustment flag when its option is null.
     /// </remarks>
     [Fact]
     public void CreateRequestOmitsNullAdjustmentOptions()
@@ -312,8 +308,8 @@ public class HistoricalDataHandlerTests
     /// <remarks>
     /// Mutation: the field errors of a historical securityData element dropped, so a
     /// bad field passes in silence, or the raise skipped.
-    /// Oracle: the Python blp test_historical_field_error_raises expected exception for
-    /// one BAD_FLD entry for the field BAD_FIELD.
+    /// Oracle: one BAD_FLD entry for the field BAD_FIELD, the error the response XML
+    /// holds.
     /// </remarks>
     [Fact]
     public void FieldErrorRaisesWhenRequested()
@@ -330,8 +326,7 @@ public class HistoricalDataHandlerTests
     /// <remarks>
     /// Mutation: a bare Exception thrown, or the exception placed under
     /// SessionException, which a caller would read as a lost session.
-    /// Oracle: the Python blp test_request_errors_are_typed expected class for the
-    /// security_errors id, one hand-built BAD_SEC record.
+    /// Oracle: RequestSecurityException, the class for one hand-built BAD_SEC record.
     /// </remarks>
     [Fact]
     public void SecurityErrorRaisesATypedException()
@@ -350,8 +345,7 @@ public class HistoricalDataHandlerTests
     /// <remarks>
     /// Mutation: a bare Exception thrown, the two exception classes swapped, or the
     /// exception placed under SessionException.
-    /// Oracle: the Python blp test_request_errors_are_typed expected class for the
-    /// field_errors id, one hand-built BAD_FLD record.
+    /// Oracle: RequestFieldException, the class for one hand-built BAD_FLD record.
     /// </remarks>
     [Fact]
     public void FieldErrorRaisesATypedException()
@@ -371,8 +365,8 @@ public class HistoricalDataHandlerTests
     /// <summary>A security error is raised before a field error.</summary>
     /// <remarks>
     /// Mutation: the field check placed before the security check.
-    /// Oracle: the Python blp BaseRequest.raise_exception, which checks security errors
-    /// first. Both kinds arrive and both flags are set.
+    /// Oracle: a security error takes precedence over a field error. Both kinds
+    /// arrive and both flags are set.
     /// </remarks>
     [Fact]
     public void SecurityErrorIsRaisedBeforeFieldError()
@@ -394,8 +388,8 @@ public class HistoricalDataHandlerTests
     /// <summary>A response with errors passes while the request raises none.</summary>
     /// <remarks>
     /// Mutation: the raise flags ignored, so every error throws.
-    /// Oracle: the Python blp test_historical_field_error_recorded, which records
-    /// errors without raising under the default flags.
+    /// Oracle: the default flags are false, so the errors are recorded and none
+    /// raises.
     /// </remarks>
     [Fact]
     public void ErrorsDoNotRaiseByDefault()

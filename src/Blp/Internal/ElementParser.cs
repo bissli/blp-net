@@ -27,7 +27,7 @@ internal sealed partial class ElementParser(
     // libb round_digit_string keeps the text of a number past this many digits.
     private const int MaxPlainDigits = 28;
 
-    // Python blpapi counts a value as a time when any one of these parts is set.
+    // A value counts as a time when any one of these parts is set.
     // Datetime.TIME needs hours, minutes and seconds all set.
     private const int TimeParts = Datetime.HOUR_PART | Datetime.MINUTE_PART
         | Datetime.SECOND_PART | Datetime.MILLISECOND_PART | Datetime.MICROSECOND_PART
@@ -192,14 +192,15 @@ internal sealed partial class ElementParser(
     }
 
     /// <summary>
-    /// text as a JSON string literal, escaped as Python's json.dumps does.
+    /// text as a JSON string literal.
     /// </summary>
     /// <param name="text">Any string.</param>
     /// <returns>
-    /// The quoted literal. A character outside printable ASCII becomes a lower-case
-    /// \uXXXX escape, except \b \t \n \f \r.
+    /// The quoted literal. The quote and backslash are backslash-escaped. A character
+    /// outside printable ASCII becomes a lower-case \uXXXX escape, except \b \t \n \f
+    /// \r, which keep their short escapes.
     /// </returns>
-    internal static string PythonJsonString(string text)
+    internal static string JsonStringLiteral(string text)
     {
         var literal = new StringBuilder("\"", text.Length + 2);
         foreach (char character in text)
@@ -226,8 +227,8 @@ internal sealed partial class ElementParser(
     /// </summary>
     /// <param name="sequence">A SEQUENCE element, an array of rows.</param>
     /// <returns>
-    /// The text Python's json.dumps writes for that list, or "" when it is empty. A
-    /// null or single sequence gives "".
+    /// The list as JSON text with ", " between entries, or "" when it is empty. A null
+    /// or single sequence gives "".
     /// </returns>
     internal static string SequenceAsJson(Element sequence)
     {
@@ -239,15 +240,15 @@ internal sealed partial class ElementParser(
                 string text = IsNumeric(subelement.Datatype)
                     ? TrimNumber(NumberText(subelement))
                     : subelement.GetValueAsString().Trim();
-                string name = PythonJsonString(subelement.Name.ToString());
-                entries.Add($"{{{name}: {PythonJsonString(text)}}}");
+                string name = JsonStringLiteral(subelement.Name.ToString());
+                entries.Add($"{{{name}: {JsonStringLiteral(text)}}}");
             }
         }
 
         return entries.Count == 0 ? "" : $"[{string.Join(", ", entries)}]";
     }
 
-    // Python blpapi's values() gives no rows for a null or single sequence.
+    // A null or single sequence has no rows.
     private static IEnumerable<Element> Rows(Element sequence)
     {
         if (!sequence.IsArray) yield break;
@@ -263,8 +264,8 @@ internal sealed partial class ElementParser(
         RegexOptions.IgnorePatternWhitespace)]
     private static partial Regex NumberPattern();
 
-    // The Python blp reads the C++ SDK's text, which writes a float as printf %f
-    // does. The managed SDK writes the shortest round-trip form instead.
+    // A float is written as printf %f does. The managed SDK's own text is the
+    // shortest round-trip form.
     private static string NumberText(Element element) => element.Datatype
         is Schema.Datatype.FLOAT64 or Schema.Datatype.FLOAT32
         ? element.GetValueAsFloat64().ToString("F6", CultureInfo.InvariantCulture)
@@ -290,7 +291,7 @@ internal sealed partial class ElementParser(
     public Dictionary<string, object?> RowValues(Element row) =>
         row.Elements.ToDictionary(subelement => subelement.Name.ToString(), ToValue);
 
-    /// <summary>rows with every name any row holds, as a Python frame has.</summary>
+    /// <summary>rows with every name any row holds.</summary>
     /// <param name="rows">Rows of name to value.</param>
     /// <returns>New rows. A name a row lacks holds null.</returns>
     public static List<IReadOnlyDictionary<string, object?>> WithEveryName(
@@ -316,7 +317,7 @@ internal sealed partial class ElementParser(
     private object DateTimeValue(Datetime value)
     {
         var wallClock = DateTime.SpecifyKind(value.ToSystemDateTime(), DateTimeKind.Unspecified);
-        // A Python datetime holds whole microseconds, so the Python blp drops the rest.
+        // Values keep whole microseconds. Finer ticks are dropped.
         wallClock = wallClock.AddTicks(-(wallClock.Ticks % TimeSpan.TicksPerMicrosecond));
         if ((value.Parts & TimeParts) == 0) return DateOnly.FromDateTime(wallClock);
         if (value.HasParts(Datetime.DATE))

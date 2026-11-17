@@ -45,9 +45,10 @@ public class IntradayTickHandlerTests
     /// not sent.
     /// </summary>
     /// <remarks>
-    /// Mutation: a flag sent under the Python option name (includeEquityRefPrice,
-    /// includeRspCodes), or an unset flag sent as false.
-    /// Oracle: the Python blp's IntradayTickRequest.create_request element names.
+    /// Mutation: a flag sent under its property name instead of its element name
+    /// (includeEquityRefPrice for includeEqRefPrice, includeRspCodes for
+    /// includeRpsCodes), or an unset flag sent as false.
+    /// Oracle: the documented IntradayTickRequest element names.
     /// </remarks>
     [Fact]
     public void CreateRequestSendsSetFlagsOnly()
