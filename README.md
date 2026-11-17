@@ -3,8 +3,9 @@
 A C# client for the Bloomberg API. It runs on Bloomberg's managed .NET SDK
 and talks to the terminal on the local host.
 
-The library covers reference data (BDP) and historical data (BDH).
-Date-time values come back in the request's time zone, and `ForceString`
+The library covers reference data (BDP), historical data (BDH),
+intraday ticks and bars, saved equity screens (EQS) and live market data
+subscriptions. Date-time values come back in the request's time zone, and `ForceString`
 gives each number as plain text with trailing zeros dropped.
 
 ## Requirements
@@ -64,6 +65,50 @@ foreach (var row in history.Rows["IBM US Equity"])
 `ConnectAsync` starts a session on `localhost:8194` with OS logon and
 checks it with one reference data request. One client serves any number
 of concurrent requests.
+
+```csharp
+using Blp.Eqs;
+using Blp.IntradayBars;
+using Blp.IntradayTicks;
+
+var start = new DateTimeOffset(2024, 1, 2, 9, 30, 0, TimeSpan.FromHours(-5));
+var end = start.AddMinutes(30);
+
+var ticks = await client.GetIntradayTicksAsync(
+    new IntradayTickRequest("IBM US Equity", start, end) { IncludeConditionCodes = true });
+
+var bars = await client.GetIntradayBarsAsync(
+    new IntradayBarRequest("IBM US Equity", start, end) { Interval = 5 });
+
+var screen = await client.GetScreenerAsync(new EqsRequest("Core Capital Ratios"));
+foreach (var (security, columns) in screen.Values)
+{
+    Console.WriteLine($"{security} {columns.Count}");
+}
+```
+
+Intraday ticks and bars come back as one name-to-value row per tick or
+bar, in time order. An EQS response keys each security's columns by the
+names the screen sends. A screen saved under the user's own login takes
+`ScreenType = EqsScreenType.Private`.
+
+```csharp
+using Blp.Subscriptions;
+
+using var subscription = Subscription.Start(
+    ["BID", "ASK"],
+    (topic, row) => Console.WriteLine($"{topic} {row.GetValueOrDefault("BID")}"));
+subscription.Add("IBM US Equity", "MSFT US Equity");
+
+SubscriptionStatus status = subscription.GetStatus();
+```
+
+A `Subscription` runs its own session on `//blp/mktdata`, apart from
+`BlpClient`. The callback runs on the SDK's dispatch thread, once per
+tick, with each subscribed field the tick carries. `GetStatus` reports
+each topic's state and, in `Failure`, why the subscription can no longer
+deliver data. `Remove` drops topics, and `Stop` or `Dispose` ends the
+session.
 
 A response keys its values by the security string Bloomberg echoes. A
 rejected security or field appears in `SecurityErrors` or `FieldErrors`
